@@ -9,6 +9,14 @@ the links, read the diffs, approve or dismiss each one.
 Written in OCaml 5.5.1 and compiled to JavaScript with js_of_ocaml, using
 [brr](https://erratique.ch/software/brr) for the DOM and fetch bindings.
 
+---
+
+<div align="center">
+  <img width="709" height="718" alt="image" src="https://github.com/user-attachments/assets/49122116-1904-41b5-b3e4-a817763ea537" />
+</div>
+
+---
+
 ## Getting started
 
 ```
