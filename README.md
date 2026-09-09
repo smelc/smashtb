@@ -1,3 +1,6 @@
+[![ocaml](https://github.com/smelc/smashtb/actions/workflows/ocaml.yml/badge.svg)](https://github.com/smelc/smashtb/actions/workflows/ocaml.yml)
+[![shellcheck](https://github.com/smelc/smashtb/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/smelc/smashtb/actions/workflows/shellcheck.yml)
+
 # smashtb
 
 A single-page app for working through a batch of GitHub pull requests. Paste
