@@ -3,3 +3,5 @@ _opam/
 _site/
 *.install
 .env
+.venv
+.envrc.priv
