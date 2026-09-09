@@ -33,6 +33,8 @@ let plural n one many = if n = 1 then one else many
 
 let no_token_msg = "No GITHUB_TOKEN. Start the app with ./run.sh so a token is passed in."
 
+module Urls = Map.Make (String)
+
 (* {1 Persistence} *)
 
 let store = Brr_io.Storage.local G.window
@@ -43,7 +45,75 @@ let store_get key =
   | Some v -> Jstr.to_string v
 
 let store_set key v = ignore (Brr_io.Storage.set_item store (Jstr.v key) (Jstr.v v))
-let prs_key = "smashtb.prs"
+let history_key = "smashtb.history"
+let history_limit = 16
+
+(* {1 History}
+
+   The pull request list itself is deliberately not restored: a new session
+   starts empty. What is kept is the last few pastes that yielded something, so
+   a batch can be put back with one click. *)
+
+type entry = {
+  source : string;  (** the text that was pasted, kept for recognising the entry *)
+  refs : Gh.pr_ref list;  (** what was extracted from it *)
+}
+
+let entry_to_jv e =
+  Jv.obj
+    [|
+      ("source", Jv.of_string e.source);
+      ("refs", Jv.of_list Jv.of_string (List.map Gh.ref_url e.refs));
+    |]
+
+let entry_of_jv j =
+  let str v = if Jv.is_none v then "" else Jstr.to_string (Jv.to_jstr v) in
+  let refs = Jv.get j "refs" in
+  {
+    source = str (Jv.get j "source");
+    refs =
+      (if Jv.is_none refs then []
+       else List.filter_map (fun v -> Gh.parse_ref (str v)) (Jv.to_list Fun.id refs));
+  }
+
+let load_history () =
+  match Json.decode (Jstr.v (store_get history_key)) with
+  | Error _ -> []
+  | Ok j ->
+      if Jv.is_none j then []
+      else List.filter (fun e -> e.refs <> []) (Jv.to_list entry_of_jv j)
+
+let save_history entries =
+  store_set history_key
+    (Jstr.to_string (Json.encode (Jv.of_list entry_to_jv entries)))
+
+(* How many references a hover lists before it stops. *)
+let hover_limit = 16
+
+let hover_text refs =
+  let shown = List.filteri (fun i _ -> i < hover_limit) refs in
+  let hidden = List.length refs - List.length shown in
+  let lines = List.map Gh.ref_to_string shown in
+  let lines =
+    if hidden = 0 then lines else lines @ [ Printf.sprintf "and %d more" hidden ]
+  in
+  String.concat "\n" lines
+
+(* A one-line gist of the pasted text, for telling entries apart. *)
+let excerpt text =
+  let flat =
+    String.map (fun c -> if c = '\n' || c = '\r' || c = '\t' then ' ' else c) text
+  in
+  let rec squeeze acc prev_space i =
+    if i >= String.length flat then acc
+    else
+      let c = flat.[i] in
+      if c = ' ' then squeeze (if prev_space then acc else acc ^ " ") true (i + 1)
+      else squeeze (acc ^ String.make 1 c) false (i + 1)
+  in
+  let one_line = String.trim (squeeze "" true 0) in
+  if String.length one_line <= 90 then one_line
+  else String.sub one_line 0 89 ^ "\xe2\x80\xa6"
 
 
 (* {1 Token} *)
@@ -278,14 +348,18 @@ let () =
   (* --- state --- *)
   let token = token_from_page () in
   let badge, set_token_state, token_status = token_badge () in
-  let loaded : (string, El.t) Hashtbl.t = Hashtbl.create 16 in
+  (* url -> the slot showing that pull request, so a card can be found again to
+     replace or remove it. *)
+  let loaded = ref Urls.empty in
   (* Fetches in flight, so the "Loading..." line can clear once they settle. *)
   let pending = ref 0 in
   let list_el = El.div ~at:[ cls "list" ] [] in
+  let history_el = El.div ~at:[ cls "history" ] [] in
+  let history = ref (load_history ()) in
   let status = El.div ~at:[ cls "status" ] [] in
   let empty_hint =
     El.div ~at:[ cls "hint" ]
-      [ txt "Paste pull request links above, one per line, then press Load." ]
+      [ txt "Paste anything holding pull request links above, then press Load." ]
   in
 
   let say ?(bad = false) msg =
@@ -293,17 +367,14 @@ let () =
     El.set_class (Jstr.v "bad") bad status
   in
 
-  let persist () =
-    let urls = Hashtbl.fold (fun k _ acc -> k :: acc) loaded [] in
-    store_set prs_key (String.concat "\n" (List.sort compare urls))
+  let hist_head = El.div ~at:[ cls "hist-head" ] [] in
+  let refresh_list () =
+    El.set_class (Jstr.v "hidden") (not (Urls.is_empty !loaded)) empty_hint
   in
-  let refresh_empty () =
-    El.set_class (Jstr.v "hidden") (Hashtbl.length loaded > 0) empty_hint
-  in
+
   let forget r =
-    Hashtbl.remove loaded (Gh.ref_url r);
-    persist ();
-    refresh_empty ();
+    loaded := Urls.remove (Gh.ref_url r) !loaded;
+    refresh_list ();
     say (Printf.sprintf "%s removed from the list." (Gh.ref_to_string r))
   in
 
@@ -322,24 +393,27 @@ let () =
   let input =
     El.textarea
       ~at:[ cls "input"; At.rows 4;
-            At.placeholder (Jstr.v "https://github.com/owner/repo/pull/1\nowner/repo#2") ]
+            At.placeholder
+              (Jstr.v
+                 "Paste links, or a whole Slack message. Anything that is not a \
+                  pull request is ignored.") ]
       []
   in
   let rec add_ref ?(force = false) (r : Gh.pr_ref) =
     let key = Gh.ref_url r in
-    if Hashtbl.mem loaded key && not force then ()
+    if Urls.mem key !loaded && not force then ()
     else begin
       let slot =
-        match Hashtbl.find_opt loaded key with
+        match Urls.find_opt key !loaded with
         | Some slot -> slot
         | None ->
             let slot = El.div ~at:[ cls "slot" ] [] in
-            Hashtbl.replace loaded key slot;
+            loaded := Urls.add key slot !loaded;
             El.append_children list_el [ slot ];
             slot
       in
       El.set_children slot [ loading_card r ];
-      refresh_empty ();
+      refresh_list ();
       incr pending;
       let settled () =
         decr pending;
@@ -368,22 +442,94 @@ let () =
     end
   in
 
+  let rec render_history () =
+    let entry_el e =
+      let n = List.length e.refs in
+      let chips =
+        List.map (fun r -> El.span ~at:[ cls "chip" ] [ txt (Gh.ref_to_string r) ]) e.refs
+      in
+      (* The whole row is the button: the column is too narrow to spare width
+         for a separate target. Everything sits on one line, cut off at the
+         edge rather than wrapping, so every entry is the same height and the
+         list stays scannable; the hover names the pull requests instead. *)
+      let el =
+        El.button
+          ~at:[ cls "entry"; attr "type" "button"; At.title (Jstr.v (hover_text e.refs)) ]
+          [
+            El.span ~at:[ cls "entry-line" ]
+              (chips @ [ El.span ~at:[ cls "entry-src" ] [ txt (excerpt e.source) ] ]);
+          ]
+      in
+      on_click el (fun _ ->
+          List.iter (fun r -> add_ref r) e.refs;
+          say
+            (Printf.sprintf "Loaded %d %s from history." n
+               (plural n "pull request" "pull requests")));
+      el
+    in
+    let n = List.length !history in
+    El.set_children hist_head
+      (El.span ~at:[ cls "hist-title" ] [ txt (Printf.sprintf "History (%d)" n) ]
+       ::
+       (if n = 0 then []
+        else
+          [
+            button ~classes:"btn tiny" ~title:"Forget every remembered paste"
+              "Clear history" (fun () ->
+                history := [];
+                save_history [];
+                render_history ());
+          ]));
+    El.set_children history_el
+      (if !history = [] then
+         [ El.div ~at:[ cls "hist-empty" ] [ txt "Pastes that yield a pull request are kept here." ] ]
+       else List.map entry_el !history)
+  in
+
+  (* Remembering a paste rather than the pull request list: the list starts
+     empty every session, and this is what puts a batch back. *)
+  let remember source refs =
+    let urls = List.map Gh.ref_url in
+    let kept = List.filter (fun e -> urls e.refs <> urls refs) !history in
+    history := { source; refs } :: kept;
+    if List.length !history > history_limit then
+      history := List.filteri (fun i _ -> i < history_limit) !history;
+    save_history !history;
+    render_history ()
+  in
+
   let load () =
     let raw = Jstr.to_string (El.prop El.Prop.value input) in
     if token = "" then say ~bad:true no_token_msg
     else
-      let refs, bad = Gh.parse_refs raw in
-      if bad <> [] then
-        say ~bad:true ("Could not read as a pull request link: " ^ String.concat ", " bad)
-      else if refs = [] then say ~bad:true "Nothing to load."
-      else begin
-        say (Printf.sprintf "Loading %d %s\xe2\x80\xa6" (List.length refs)
-               (plural (List.length refs) "pull request" "pull requests"));
-        List.iter (fun r -> add_ref r) refs;
-        persist ();
-        El.set_prop El.Prop.value Jstr.empty input
-      end
+      match Gh.extract_refs raw with
+      | [] ->
+          say ~bad:true
+            "No pull request links in that text. Paste a github.com link, or owner/repo#12."
+      | refs ->
+          let n = List.length refs in
+          say
+            (Printf.sprintf "Found %d %s\xe2\x80\xa6" n
+               (plural n "pull request" "pull requests"));
+          List.iter (fun r -> add_ref r) refs;
+          remember raw refs;
+          El.set_prop El.Prop.value Jstr.empty input
   in
+
+  (* Ctrl+Enter (Cmd+Enter on a Mac) anywhere on the page presses Load, so a
+     paste can be sent without reaching for the mouse. *)
+  ignore
+    (Ev.listen Ev.keydown
+       (fun ev ->
+         let k = Ev.as_type ev in
+         if
+           (Ev.Keyboard.ctrl_key k || Ev.Keyboard.meta_key k)
+           && Jstr.equal (Ev.Keyboard.key k) (Jstr.v "Enter")
+         then begin
+           Ev.prevent_default ev;
+           load ()
+         end)
+       (Document.as_target G.document));
 
   let set_all_prs b =
     ignore
@@ -395,20 +541,20 @@ let () =
   let controls =
     El.div ~at:[ cls "controls" ]
       [
-        button ~classes:"btn primary" "Load" load;
+        button ~classes:"btn primary" ~title:"Load the pull requests found above (Ctrl+Enter)"
+          "Load" load;
         button "Expand all" (fun () -> set_all_prs true);
         button "Collapse all" (fun () -> set_all_prs false);
         button ~title:"Re-fetch every pull request currently shown" "Reload all" (fun () ->
-            let keys = Hashtbl.fold (fun k _ acc -> k :: acc) loaded [] in
-            List.iter
-              (fun k -> match Gh.parse_ref k with Some r -> add_ref ~force:true r | None -> ())
-              keys);
+            Urls.iter
+              (fun k _ ->
+                match Gh.parse_ref k with Some r -> add_ref ~force:true r | None -> ())
+              !loaded);
         button ~title:"Remove every pull request from the list. Nothing is sent to GitHub."
           "Clear" (fun () ->
             El.set_children list_el [];
-            Hashtbl.reset loaded;
-            persist ();
-            refresh_empty ();
+            loaded := Urls.empty;
+            refresh_list ();
             say "List cleared.");
       ]
   in
@@ -422,12 +568,18 @@ let () =
             El.span ~at:[ cls "tag" ] [ txt "review, approve, move on" ];
             badge;
           ];
-        input;
+        El.div
+          ~at:[ cls "compose" ]
+          [
+            input;
+            El.v ~at:[ cls "history-col" ] (Jstr.v "aside") [ hist_head; history_el ];
+          ];
         controls;
         status;
       ]
   in
   El.set_children doc_body [ header; empty_hint; list_el ];
+  render_history ();
 
   if token = "" then begin
     set_token_state (Broken no_token_msg);
@@ -443,8 +595,6 @@ let () =
       | Error e -> set_token_state (Broken ("GitHub turned this token down: " ^ e)))
   end;
 
-  (* Restore the list from the previous session. *)
-  (match Gh.parse_refs (store_get prs_key) with
-  | [], _ -> ()
-  | refs, _ -> if token <> "" then List.iter (fun r -> add_ref r) refs);
-  refresh_empty ()
+  (* The list deliberately starts empty; the history column is what brings a
+     previous batch back. *)
+  refresh_list ()

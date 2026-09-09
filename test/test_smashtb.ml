@@ -41,10 +41,47 @@ let () =
   url "junk" "hello" "none";
   url "empty" "" "none";
 
-  let refs, bad = Pr_url.parse_many "o/r#1\n\nhttps://github.com/o/r/pull/2 , o/r#3\nnope" in
-  check "parse_many keeps order and count"
-    (List.map Pr_url.to_string refs = [ "o/r#1"; "o/r#2"; "o/r#3" ]);
-  check "parse_many reports junk" (bad = [ "nope" ]);
+  (* Extraction from free-form text: everything that is not a pull request
+     reference is ignored, and each one is kept once, in order of appearance. *)
+  let extracted text = List.map Pr_url.to_string (Pr_url.extract text) in
+  let same name text expected =
+    let got = extracted text in
+    if got <> expected then begin
+      incr failures;
+      Printf.printf "FAIL %s: %S -> [%s], expected [%s]\n" name text (String.concat "; " got)
+        (String.concat "; " expected)
+    end
+  in
+  same "one per line" "o/r#1\nhttps://github.com/o/r/pull/2\no/r#3" [ "o/r#1"; "o/r#2"; "o/r#3" ];
+  same "duplicates collapse"
+    "https://github.com/o/r/pull/2 and again https://github.com/o/r/pull/2" [ "o/r#2" ];
+  same "same pr in two spellings" "o/r#2 https://github.com/o/r/pull/2" [ "o/r#2" ];
+  same "prose is ignored" "nothing to see here" [];
+  same "trailing full stop"
+    "please review https://github.com/o/r/pull/9." [ "o/r#9" ];
+  same "wrapped in a sentence"
+    "Can someone look at https://github.com/o/r/pull/9, it blocks the release?" [ "o/r#9" ];
+  same "slack angle brackets" "<https://github.com/o/r/pull/9>" [ "o/r#9" ];
+  same "slack link with a label" "<https://github.com/o/r/pull/9|PR 9 here>" [ "o/r#9" ];
+  same "markdown link" "[the fix](https://github.com/o/r/pull/9)" [ "o/r#9" ];
+  same "parenthesised" "(https://github.com/o/r/pull/9)" [ "o/r#9" ];
+  same "backticks" "`https://github.com/o/r/pull/9`" [ "o/r#9" ];
+  same "files tab and anchor keep working"
+    "https://github.com/o/r/pull/9/files#diff-abc123" [ "o/r#9" ];
+  same "issues are not pull requests" "https://github.com/o/r/issues/9" [];
+  same "other links are ignored"
+    "see https://example.com/a/b/pull/1x and https://github.com/o/r" [];
+
+  (* The shape this is really for: a pasted Slack message. *)
+  let slack =
+    "Alice  10:32\n\
+     hey team, can I get eyes on <https://github.com/acme/widgets/pull/12|widgets#12>?\n\
+     it depends on acme/core#88, and the deploy notes are at\n\
+     https://wiki.example.com/deploys (nothing to review there)\n\
+     Bob  10:35\n\
+     looking. also https://github.com/acme/widgets/pull/12/files is easier to read"
+  in
+  same "slack message" slack [ "acme/widgets#12"; "acme/core#88" ];
 
   (* A two-hunk patch: line numbers must restart at each hunk header, additions
      must only advance the new-side counter, deletions only the old side. *)

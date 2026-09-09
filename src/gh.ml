@@ -43,7 +43,7 @@ type pr_ref = Smashtb.Pr_url.t = { owner : string; repo : string; number : int }
 let ref_to_string = Smashtb.Pr_url.to_string
 let ref_url = Smashtb.Pr_url.to_url
 let parse_ref = Smashtb.Pr_url.parse
-let parse_refs = Smashtb.Pr_url.parse_many
+let extract_refs = Smashtb.Pr_url.extract
 
 (* {1 HTTP} *)
 

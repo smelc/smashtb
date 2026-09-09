@@ -137,6 +137,93 @@ a:hover { text-decoration: underline; }
 .hint { padding: 40px 20px; text-align: center; color: var(--fg-mut); }
 .hidden { display: none !important; }
 
+/* ---------- compose row: input on the left, history on the right ---------- */
+
+/* The input and the history share one line; the buttons wrap below both. */
+.compose { display: flex; align-items: stretch; gap: 16px; }
+.compose > .input { flex: 1 1 auto; min-width: 0; width: auto; }
+
+.history-col {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  /* Without this a flex item refuses to go below its content's width, and one
+     entry holding twenty references would stretch the column across the page. */
+  min-width: 0;
+  /* No height of its own: it takes the input box's, so the two line up and the
+     entries scroll instead of stretching the sticky header down the page. */
+}
+
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.hist-title { flex: 1 1 auto; color: var(--fg-mut); font-size: 12px; }
+
+.history {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.hist-empty {
+  padding: 10px 2px;
+  color: var(--fg-mut);
+  font-size: 12px;
+}
+
+.entry {
+  flex: none;
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+.entry:hover { background: var(--bg-sunk); border-color: var(--accent); }
+
+/* One line, clipped. The ellipsis lives on this span rather than on the
+   button, where text-overflow is unreliable. */
+.entry-line {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.entry-src { color: var(--fg-mut); font-size: 11.5px; }
+
+/* Narrow windows: the history drops below the input instead of squeezing it. */
+@media (max-width: 860px) {
+  .compose { flex-direction: column; }
+  .history-col { flex: 1 1 auto; max-height: 140px; }
+}
+
 /* ---------- pull request card ---------- */
 
 .list { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 60px; }

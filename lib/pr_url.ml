@@ -53,17 +53,48 @@ let parse (s : string) : t option =
         | _ -> parse_url s)
     | _ -> parse_url s
 
-(* Split free-form text on whitespace and commas, then parse each token.
-   Returns the references found and the tokens that made no sense. *)
-let parse_many (text : string) : t list * string list =
-  let is_sep c = c = '\n' || c = '\r' || c = ' ' || c = '\t' || c = ',' in
-  let tokens = String.split_on_char '\n' (String.map (fun c -> if is_sep c then '\n' else c) text) in
-  let ok, bad =
-    List.fold_left
-      (fun (ok, bad) tok ->
-        let tok = String.trim tok in
-        if tok = "" then (ok, bad)
-        else match parse tok with Some r -> (r :: ok, bad) | None -> (ok, tok :: bad))
-      ([], []) tokens
+(* Characters that can appear inside a pull request reference. Everything else
+   ends the token, which is what makes pasted prose work: Slack wraps links in
+   <angle brackets> and appends |labels, markdown wraps them in [](), and
+   sentences put commas and full stops against them. *)
+let is_ref_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+  | '/' | ':' | '.' | '-' | '_' | '#' | '~' | '?' | '=' | '&' | '%' | '+' -> true
+  | _ -> false
+
+let tokens text =
+  let n = String.length text in
+  let emit start stop acc =
+    if stop > start then String.sub text start (stop - start) :: acc else acc
   in
-  (List.rev ok, List.rev bad)
+  let rec go i start acc =
+    if i >= n then List.rev (emit start n acc)
+    else if is_ref_char text.[i] then go (i + 1) start acc
+    else go (i + 1) (i + 1) (emit start i acc)
+  in
+  go 0 0 []
+
+(* Punctuation that is a reference character in the middle of a link but is
+   only ever sentence noise at the end of one. *)
+let rec trim_tail s =
+  let n = String.length s in
+  if n = 0 then s
+  else
+    match s.[n - 1] with
+    | '.' | ',' | ':' | ';' | '#' | '-' | '_' | '?' | '=' | '&' | '%' | '+' | '~' | '/' ->
+        trim_tail (String.sub s 0 (n - 1))
+    | _ -> s
+
+(* Pull every distinct pull request reference out of arbitrary text, in the
+   order they appear. Anything that is not one is ignored, so a whole Slack
+   message can be pasted in and only the links matter. *)
+let extract (text : string) : t list =
+  let keep (seen, found) tok =
+    match parse (trim_tail tok) with
+    | None -> (seen, found)
+    | Some r ->
+        let key = to_string r in
+        if List.mem key seen then (seen, found) else (key :: seen, r :: found)
+  in
+  let _, found = List.fold_left keep ([], []) (tokens text) in
+  List.rev found
