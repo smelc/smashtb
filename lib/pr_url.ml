@@ -3,14 +3,17 @@
 type t = { owner : string; repo : string; number : int }
 
 let to_string r = Printf.sprintf "%s/%s#%d" r.owner r.repo r.number
-let to_url r = Printf.sprintf "https://github.com/%s/%s/pull/%d" r.owner r.repo r.number
+
+let to_url r =
+  Printf.sprintf "https://github.com/%s/%s/pull/%d" r.owner r.repo r.number
 
 let non_empty = List.filter (fun s -> s <> "")
 
 let cut c s =
   match String.index_opt s c with
   | None -> (s, None)
-  | Some i -> (String.sub s 0 i, Some (String.sub s (i + 1) (String.length s - i - 1)))
+  | Some i ->
+      (String.sub s 0 i, Some (String.sub s (i + 1) (String.length s - i - 1)))
 
 let drop_scheme s =
   match String.index_opt s ':' with
@@ -23,7 +26,8 @@ let parse_url s =
   let body, _ = cut '?' body in
   let segs = non_empty (String.split_on_char '/' (drop_scheme body)) in
   let rec find = function
-    | owner :: repo :: kind :: number :: _ when kind = "pull" || kind = "pulls" -> (
+    | owner :: repo :: kind :: number :: _ when kind = "pull" || kind = "pulls"
+      -> (
         match int_of_string_opt number with
         | Some number when number > 0 -> Some { owner; repo; number }
         | _ -> None)
@@ -42,14 +46,17 @@ let parse (s : string) : t option =
   if s = "" then None
   else
     match cut '#' s with
-    | short, Some after when (not (String.contains short ':')) && String.contains short '/' -> (
+    | short, Some after
+      when (not (String.contains short ':')) && String.contains short '/' -> (
         (* owner/repo#12.  A real URL fragment always sits behind a scheme or a
            longer path, both of which fail the two-segment match below and fall
            through to [parse_url]. *)
         match
-          (non_empty (String.split_on_char '/' short), int_of_string_opt (String.trim after))
+          ( non_empty (String.split_on_char '/' short),
+            int_of_string_opt (String.trim after) )
         with
-        | [ owner; repo ], Some number when number > 0 -> Some { owner; repo; number }
+        | [ owner; repo ], Some number when number > 0 ->
+            Some { owner; repo; number }
         | _ -> parse_url s)
     | _ -> parse_url s
 
@@ -59,7 +66,8 @@ let parse (s : string) : t option =
    sentences put commas and full stops against them. *)
 let is_ref_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
-  | '/' | ':' | '.' | '-' | '_' | '#' | '~' | '?' | '=' | '&' | '%' | '+' -> true
+  | '/' | ':' | '.' | '-' | '_' | '#' | '~' | '?' | '=' | '&' | '%' | '+' ->
+      true
   | _ -> false
 
 let tokens text =
@@ -81,7 +89,8 @@ let rec trim_tail s =
   if n = 0 then s
   else
     match s.[n - 1] with
-    | '.' | ',' | ':' | ';' | '#' | '-' | '_' | '?' | '=' | '&' | '%' | '+' | '~' | '/' ->
+    | '.' | ',' | ':' | ';' | '#' | '-' | '_' | '?' | '=' | '&' | '%' | '+'
+    | '~' | '/' ->
         trim_tail (String.sub s 0 (n - 1))
     | _ -> s
 

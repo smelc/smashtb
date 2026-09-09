@@ -19,4 +19,5 @@
   (ocaml (>= 5.5.0))
   (dune (>= 3.16))
   (brr (>= 0.0.6))
-  (js_of_ocaml-compiler (>= 5.8))))
+  (js_of_ocaml-compiler (>= 5.8))
+  (ocamlformat (and :with-test (= 0.29.0)))))

@@ -11,9 +11,7 @@ let check name ok =
     Printf.printf "FAIL %s\n" name
   end
 
-let show = function
-  | None -> "none"
-  | Some r -> Pr_url.to_string r
+let show = function None -> "none" | Some r -> Pr_url.to_string r
 
 let url name input expected =
   let got = show (Pr_url.parse input) in
@@ -23,10 +21,13 @@ let url name input expected =
   end
 
 let () =
-  url "repo url with an anchor is not a pr" "https://github.com/smelc/smelc#1" "none";
+  url "repo url with an anchor is not a pr" "https://github.com/smelc/smelc#1"
+    "none";
   url "pull url" "https://github.com/smelc/smelc/pull/42" "smelc/smelc#42";
-  url "files tab" "https://github.com/smelc/smelc/pull/42/files" "smelc/smelc#42";
-  url "comment anchor" "https://github.com/o/r/pull/7#issuecomment-12345" "o/r#7";
+  url "files tab" "https://github.com/smelc/smelc/pull/42/files"
+    "smelc/smelc#42";
+  url "comment anchor" "https://github.com/o/r/pull/7#issuecomment-12345"
+    "o/r#7";
   url "query string" "https://github.com/o/r/pull/7?w=1" "o/r#7";
   url "no scheme" "github.com/o/r/pull/7" "o/r#7";
   url "api url" "https://api.github.com/repos/o/r/pulls/7" "o/r#7";
@@ -48,21 +49,27 @@ let () =
     let got = extracted text in
     if got <> expected then begin
       incr failures;
-      Printf.printf "FAIL %s: %S -> [%s], expected [%s]\n" name text (String.concat "; " got)
+      Printf.printf "FAIL %s: %S -> [%s], expected [%s]\n" name text
+        (String.concat "; " got)
         (String.concat "; " expected)
     end
   in
-  same "one per line" "o/r#1\nhttps://github.com/o/r/pull/2\no/r#3" [ "o/r#1"; "o/r#2"; "o/r#3" ];
+  same "one per line" "o/r#1\nhttps://github.com/o/r/pull/2\no/r#3"
+    [ "o/r#1"; "o/r#2"; "o/r#3" ];
   same "duplicates collapse"
-    "https://github.com/o/r/pull/2 and again https://github.com/o/r/pull/2" [ "o/r#2" ];
-  same "same pr in two spellings" "o/r#2 https://github.com/o/r/pull/2" [ "o/r#2" ];
+    "https://github.com/o/r/pull/2 and again https://github.com/o/r/pull/2"
+    [ "o/r#2" ];
+  same "same pr in two spellings" "o/r#2 https://github.com/o/r/pull/2"
+    [ "o/r#2" ];
   same "prose is ignored" "nothing to see here" [];
-  same "trailing full stop"
-    "please review https://github.com/o/r/pull/9." [ "o/r#9" ];
+  same "trailing full stop" "please review https://github.com/o/r/pull/9."
+    [ "o/r#9" ];
   same "wrapped in a sentence"
-    "Can someone look at https://github.com/o/r/pull/9, it blocks the release?" [ "o/r#9" ];
+    "Can someone look at https://github.com/o/r/pull/9, it blocks the release?"
+    [ "o/r#9" ];
   same "slack angle brackets" "<https://github.com/o/r/pull/9>" [ "o/r#9" ];
-  same "slack link with a label" "<https://github.com/o/r/pull/9|PR 9 here>" [ "o/r#9" ];
+  same "slack link with a label" "<https://github.com/o/r/pull/9|PR 9 here>"
+    [ "o/r#9" ];
   same "markdown link" "[the fix](https://github.com/o/r/pull/9)" [ "o/r#9" ];
   same "parenthesised" "(https://github.com/o/r/pull/9)" [ "o/r#9" ];
   same "backticks" "`https://github.com/o/r/pull/9`" [ "o/r#9" ];
@@ -75,11 +82,13 @@ let () =
   (* The shape this is really for: a pasted Slack message. *)
   let slack =
     "Alice  10:32\n\
-     hey team, can I get eyes on <https://github.com/acme/widgets/pull/12|widgets#12>?\n\
+     hey team, can I get eyes on \
+     <https://github.com/acme/widgets/pull/12|widgets#12>?\n\
      it depends on acme/core#88, and the deploy notes are at\n\
      https://wiki.example.com/deploys (nothing to review there)\n\
      Bob  10:35\n\
-     looking. also https://github.com/acme/widgets/pull/12/files is easier to read"
+     looking. also https://github.com/acme/widgets/pull/12/files is easier to \
+     read"
   in
   same "slack message" slack [ "acme/widgets#12"; "acme/core#88" ];
 
@@ -105,10 +114,20 @@ let () =
   check "line count" (List.length lines = 10);
   check "kinds"
     (kinds
-    = Diff.[ Hunk; Context; Removed; Added; Added; Context; Hunk; Removed; Context; Meta ]);
-  let numbers =
-    List.map (fun (l : Diff.line) -> (l.old_no, l.new_no)) lines
-  in
+    = Diff.
+        [
+          Hunk;
+          Context;
+          Removed;
+          Added;
+          Added;
+          Context;
+          Hunk;
+          Removed;
+          Context;
+          Meta;
+        ]);
+  let numbers = List.map (fun (l : Diff.line) -> (l.old_no, l.new_no)) lines in
   check "numbering"
     (numbers
     = [
@@ -131,9 +150,7 @@ let () =
   (* Hunks may omit the count when it is 1. *)
   let short = Diff.parse "@@ -5 +6 @@\n+x" in
   check "short hunk header"
-    (match short with
-    | [ _; { Diff.new_no = Some 6; _ } ] -> true
-    | _ -> false);
+    (match short with [ _; { Diff.new_no = Some 6; _ } ] -> true | _ -> false);
 
   check "empty patch" (Diff.parse "" = []);
 

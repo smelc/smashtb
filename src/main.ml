@@ -15,13 +15,17 @@ let on_click el f =
 let set_disabled el b =
   El.set_at (Jstr.v "disabled") (if b then Some Jstr.empty else None) el
 
-let set_open el b = El.set_at (Jstr.v "open") (if b then Some Jstr.empty else None) el
+let set_open el b =
+  El.set_at (Jstr.v "open") (if b then Some Jstr.empty else None) el
+
 let details ?(at = []) children = El.v ~at (Jstr.v "details") children
 let summary ?(at = []) children = El.v ~at (Jstr.v "summary") children
 
 let button ?(classes = "btn") ?title label f =
   let at = [ cls classes; attr "type" "button" ] in
-  let at = match title with None -> at | Some t -> At.title (Jstr.v t) :: at in
+  let at =
+    match title with None -> at | Some t -> At.title (Jstr.v t) :: at
+  in
   let b = El.button ~at [ txt label ] in
   on_click b (fun ev ->
       Ev.stop_propagation ev;
@@ -31,7 +35,8 @@ let button ?(classes = "btn") ?title label f =
 
 let plural n one many = if n = 1 then one else many
 
-let no_token_msg = "No GITHUB_TOKEN. Start the app with ./run.sh so a token is passed in."
+let no_token_msg =
+  "No GITHUB_TOKEN. Start the app with ./run.sh so a token is passed in."
 
 module Urls = Map.Make (String)
 
@@ -44,7 +49,9 @@ let store_get key =
   | None -> ""
   | Some v -> Jstr.to_string v
 
-let store_set key v = ignore (Brr_io.Storage.set_item store (Jstr.v key) (Jstr.v v))
+let store_set key v =
+  ignore (Brr_io.Storage.set_item store (Jstr.v key) (Jstr.v v))
+
 let history_key = "smashtb.history"
 let history_limit = 16
 
@@ -55,7 +62,8 @@ let history_limit = 16
    a batch can be put back with one click. *)
 
 type entry = {
-  source : string;  (** the text that was pasted, kept for recognising the entry *)
+  source : string;
+      (** the text that was pasted, kept for recognising the entry *)
   refs : Gh.pr_ref list;  (** what was extracted from it *)
 }
 
@@ -73,7 +81,10 @@ let entry_of_jv j =
     source = str (Jv.get j "source");
     refs =
       (if Jv.is_none refs then []
-       else List.filter_map (fun v -> Gh.parse_ref (str v)) (Jv.to_list Fun.id refs));
+       else
+         List.filter_map
+           (fun v -> Gh.parse_ref (str v))
+           (Jv.to_list Fun.id refs));
   }
 
 let load_history () =
@@ -95,26 +106,29 @@ let hover_text refs =
   let hidden = List.length refs - List.length shown in
   let lines = List.map Gh.ref_to_string shown in
   let lines =
-    if hidden = 0 then lines else lines @ [ Printf.sprintf "and %d more" hidden ]
+    if hidden = 0 then lines
+    else lines @ [ Printf.sprintf "and %d more" hidden ]
   in
   String.concat "\n" lines
 
 (* A one-line gist of the pasted text, for telling entries apart. *)
 let excerpt text =
   let flat =
-    String.map (fun c -> if c = '\n' || c = '\r' || c = '\t' then ' ' else c) text
+    String.map
+      (fun c -> if c = '\n' || c = '\r' || c = '\t' then ' ' else c)
+      text
   in
   let rec squeeze acc prev_space i =
     if i >= String.length flat then acc
     else
       let c = flat.[i] in
-      if c = ' ' then squeeze (if prev_space then acc else acc ^ " ") true (i + 1)
+      if c = ' ' then
+        squeeze (if prev_space then acc else acc ^ " ") true (i + 1)
       else squeeze (acc ^ String.make 1 c) false (i + 1)
   in
   let one_line = String.trim (squeeze "" true 0) in
   if String.length one_line <= 90 then one_line
   else String.sub one_line 0 89 ^ "\xe2\x80\xa6"
-
 
 (* {1 Token} *)
 
@@ -135,7 +149,8 @@ let token_from_page () =
 
 type token_state =
   | Untested of string  (** why we cannot say yet *)
-  | Works of string option  (** the login GitHub reported, when we asked for it *)
+  | Works of string option
+      (** the login GitHub reported, when we asked for it *)
   | Broken of string  (** what went wrong *)
 
 let token_badge () =
@@ -147,13 +162,14 @@ let token_badge () =
     state := s;
     let mark, style, tip =
       match s with
-      | Untested why ->
-          ("\xe2\x9d\x93", "tok-untested", why)
-      | Works None -> ("\xe2\x9c\x85", "tok-works", "GitHub accepted this token.")
+      | Untested why -> ("\xe2\x9d\x93", "tok-untested", why)
+      | Works None ->
+          ("\xe2\x9c\x85", "tok-works", "GitHub accepted this token.")
       | Works (Some login) ->
           ( "\xe2\x9c\x85",
             "tok-works",
-            Printf.sprintf "GitHub accepted this token. Approvals are posted as %s." login )
+            Printf.sprintf
+              "GitHub accepted this token. Approvals are posted as %s." login )
       | Broken why -> ("\xe2\x9d\x8c", "tok-broken", why)
     in
     El.set_children glyph [ txt mark ];
@@ -169,9 +185,13 @@ let render_diff (f : Gh.file) =
   | None ->
       let why =
         match f.status with
-        | "removed" -> "File deleted. GitHub does not send a patch for deletions of large files."
+        | "removed" ->
+            "File deleted. GitHub does not send a patch for deletions of large \
+             files."
         | "renamed" -> "Renamed with no content change."
-        | _ -> "No diff available: the file is binary, or its diff is too large for the API."
+        | _ ->
+            "No diff available: the file is binary, or its diff is too large \
+             for the API."
       in
       El.div ~at:[ cls "diff-empty" ] [ txt why ]
   | Some patch ->
@@ -221,11 +241,21 @@ let render_file (f : Gh.file) =
         El.span ~at:[ cls "chev" ] [ txt "\xe2\x96\xb8" ];
         El.span ~at:[ cls ("fstatus s-" ^ f.status) ] [ txt f.status ];
         El.span ~at:[ cls "fname" ] [ txt name ];
-        El.span ~at:[ cls "stat add" ] [ txt (Printf.sprintf "+%d" f.additions) ];
-        El.span ~at:[ cls "stat del" ] [ txt (Printf.sprintf "-%d" f.deletions) ];
+        El.span
+          ~at:[ cls "stat add" ]
+          [ txt (Printf.sprintf "+%d" f.additions) ];
+        El.span
+          ~at:[ cls "stat del" ]
+          [ txt (Printf.sprintf "-%d" f.deletions) ];
         El.a
-          ~at:[ cls "blob"; At.href (Jstr.v f.blob_url); attr "target" "_blank";
-                attr "rel" "noreferrer"; At.title (Jstr.v "Open this file on GitHub") ]
+          ~at:
+            [
+              cls "blob";
+              At.href (Jstr.v f.blob_url);
+              attr "target" "_blank";
+              attr "rel" "noreferrer";
+              At.title (Jstr.v "Open this file on GitHub");
+            ]
           [ txt "view" ];
       ]
   in
@@ -244,7 +274,11 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
   let card = details ~at:[ cls "pr"; attr "open" "" ] [] in
 
   let set_all_files b =
-    List.iter (fun (el, build) -> if b then build (); set_open el b) files
+    List.iter
+      (fun (el, build) ->
+        if b then build ();
+        set_open el b)
+      files
   in
   let files_block =
     details
@@ -254,10 +288,15 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
           ~at:[ cls "files-head" ]
           [
             El.span ~at:[ cls "chev" ] [ txt "\xe2\x96\xb8" ];
-            El.span ~at:[ cls "files-title" ]
-              [ txt (Printf.sprintf "%d %s changed" n (plural n "file" "files")) ];
-            button ~classes:"btn tiny" "expand diffs" (fun () -> set_all_files true);
-            button ~classes:"btn tiny" "collapse diffs" (fun () -> set_all_files false);
+            El.span
+              ~at:[ cls "files-title" ]
+              [
+                txt (Printf.sprintf "%d %s changed" n (plural n "file" "files"));
+              ];
+            button ~classes:"btn tiny" "expand diffs" (fun () ->
+                set_all_files true);
+            button ~classes:"btn tiny" "collapse diffs" (fun () ->
+                set_all_files false);
           ];
         El.div ~at:[ cls "file-list" ] file_els;
       ]
@@ -280,7 +319,9 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
     set_disabled !dismiss_btn b
   in
   approve_btn :=
-    button ~classes:"btn primary" ~title:"Post an approving review on GitHub, then remove this PR from the list"
+    button ~classes:"btn primary"
+      ~title:
+        "Post an approving review on GitHub, then remove this PR from the list"
       "Approve" (fun () ->
         clear_error ();
         busy true;
@@ -296,12 +337,15 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
               show_error ("Could not approve: " ^ e)));
   dismiss_btn :=
     button ~classes:"btn"
-      ~title:"Remove this PR from the list without approving it. Nothing is sent to GitHub."
-      "Dismiss" (fun () -> gone ());
+      ~title:
+        "Remove this PR from the list without approving it. Nothing is sent to \
+         GitHub." "Dismiss" (fun () -> gone ());
 
   let badges =
     List.filter_map
-      (fun (b, label, c) -> if b then Some (El.span ~at:[ cls ("badge " ^ c) ] [ txt label ]) else None)
+      (fun (b, label, c) ->
+        if b then Some (El.span ~at:[ cls ("badge " ^ c) ] [ txt label ])
+        else None)
       [
         (pr.draft, "draft", "b-draft");
         (pr.merged, "merged", "b-merged");
@@ -317,30 +361,46 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
         El.div
           ~at:[ cls "pr-ident" ]
           [
-            El.div ~at:[ cls "pr-line1" ]
+            El.div
+              ~at:[ cls "pr-line1" ]
               (El.a
-                 ~at:[ cls "pr-num"; At.href (Jstr.v pr.html_url); attr "target" "_blank";
-                       attr "rel" "noreferrer" ]
+                 ~at:
+                   [
+                     cls "pr-num";
+                     At.href (Jstr.v pr.html_url);
+                     attr "target" "_blank";
+                     attr "rel" "noreferrer";
+                   ]
                  [ txt (Gh.ref_to_string pr.pr_ref) ]
-               :: El.span ~at:[ cls "pr-title" ] [ txt pr.title ]
-               :: badges);
-            El.div ~at:[ cls "pr-line2" ]
+              :: El.span ~at:[ cls "pr-title" ] [ txt pr.title ]
+              :: badges);
+            El.div
+              ~at:[ cls "pr-line2" ]
               [
-                txt (Printf.sprintf "by %s \xc2\xb7 %s \xe2\x86\x90 %s \xc2\xb7 " pr.author pr.base pr.head);
-                El.span ~at:[ cls "stat add" ] [ txt (Printf.sprintf "+%d" pr.additions) ];
-                El.span ~at:[ cls "stat del" ] [ txt (Printf.sprintf "-%d" pr.deletions) ];
+                txt
+                  (Printf.sprintf "by %s \xc2\xb7 %s \xe2\x86\x90 %s \xc2\xb7 "
+                     pr.author pr.base pr.head);
+                El.span
+                  ~at:[ cls "stat add" ]
+                  [ txt (Printf.sprintf "+%d" pr.additions) ];
+                El.span
+                  ~at:[ cls "stat del" ]
+                  [ txt (Printf.sprintf "-%d" pr.deletions) ];
               ];
           ];
         El.div ~at:[ cls "actions" ] [ !dismiss_btn; !approve_btn ];
       ]
   in
-  El.set_children card [ head; El.div ~at:[ cls "pr-body" ] [ error_box; files_block ] ];
+  El.set_children card
+    [ head; El.div ~at:[ cls "pr-body" ] [ error_box; files_block ] ];
   card
 
 (* {1 Shell} *)
 
 let loading_card (r : Gh.pr_ref) =
-  El.div ~at:[ cls "pr placeholder" ] [ txt (Printf.sprintf "Loading %s\xe2\x80\xa6" (Gh.ref_to_string r)) ]
+  El.div
+    ~at:[ cls "pr placeholder" ]
+    [ txt (Printf.sprintf "Loading %s\xe2\x80\xa6" (Gh.ref_to_string r)) ]
 
 let () =
   let doc_body = Document.body G.document in
@@ -358,8 +418,11 @@ let () =
   let history = ref (load_history ()) in
   let status = El.div ~at:[ cls "status" ] [] in
   let empty_hint =
-    El.div ~at:[ cls "hint" ]
-      [ txt "Paste anything holding pull request links above, then press Load." ]
+    El.div
+      ~at:[ cls "hint" ]
+      [
+        txt "Paste anything holding pull request links above, then press Load.";
+      ]
   in
 
   let say ?(bad = false) msg =
@@ -383,7 +446,9 @@ let () =
      a login we already learned from /user. *)
   let on_api = function
     | Ok () -> (
-        match !token_status with Works _ -> () | _ -> set_token_state (Works None))
+        match !token_status with
+        | Works _ -> ()
+        | _ -> set_token_state (Works None))
     | Error e ->
         if Gh.is_auth_error e then
           set_token_state (Broken ("GitHub turned this token down: " ^ e))
@@ -392,11 +457,15 @@ let () =
   (* --- input --- *)
   let input =
     El.textarea
-      ~at:[ cls "input"; At.rows 4;
-            At.placeholder
-              (Jstr.v
-                 "Paste links, or a whole Slack message. Anything that is not a \
-                  pull request is ignored.") ]
+      ~at:
+        [
+          cls "input";
+          At.rows 4;
+          At.placeholder
+            (Jstr.v
+               "Paste links, or a whole Slack message. Anything that is not a \
+                pull request is ignored.");
+        ]
       []
   in
   let rec add_ref ?(force = false) (r : Gh.pr_ref) =
@@ -428,13 +497,23 @@ let () =
             settled ();
             on_api (Error e);
             let retry = button "Retry" (fun () -> add_ref ~force:true r) in
-            let drop = button "Remove" (fun () -> El.remove slot; forget r) in
+            let drop =
+              button "Remove" (fun () ->
+                  El.remove slot;
+                  forget r)
+            in
             El.set_children slot
               [
-                El.div ~at:[ cls "pr failed" ]
+                El.div
+                  ~at:[ cls "pr failed" ]
                   [
-                    El.div ~at:[ cls "pr-line1" ]
-                      [ El.span ~at:[ cls "pr-num" ] [ txt (Gh.ref_to_string r) ] ];
+                    El.div
+                      ~at:[ cls "pr-line1" ]
+                      [
+                        El.span
+                          ~at:[ cls "pr-num" ]
+                          [ txt (Gh.ref_to_string r) ];
+                      ];
                     El.div ~at:[ cls "error" ] [ txt e ];
                     El.div ~at:[ cls "actions" ] [ retry; drop ];
                   ];
@@ -446,7 +525,9 @@ let () =
     let entry_el e =
       let n = List.length e.refs in
       let chips =
-        List.map (fun r -> El.span ~at:[ cls "chip" ] [ txt (Gh.ref_to_string r) ]) e.refs
+        List.map
+          (fun r -> El.span ~at:[ cls "chip" ] [ txt (Gh.ref_to_string r) ])
+          e.refs
       in
       (* The whole row is the button: the column is too narrow to spare width
          for a separate target. Everything sits on one line, cut off at the
@@ -454,10 +535,17 @@ let () =
          list stays scannable; the hover names the pull requests instead. *)
       let el =
         El.button
-          ~at:[ cls "entry"; attr "type" "button"; At.title (Jstr.v (hover_text e.refs)) ]
+          ~at:
+            [
+              cls "entry";
+              attr "type" "button";
+              At.title (Jstr.v (hover_text e.refs));
+            ]
           [
-            El.span ~at:[ cls "entry-line" ]
-              (chips @ [ El.span ~at:[ cls "entry-src" ] [ txt (excerpt e.source) ] ]);
+            El.span
+              ~at:[ cls "entry-line" ]
+              (chips
+              @ [ El.span ~at:[ cls "entry-src" ] [ txt (excerpt e.source) ] ]);
           ]
       in
       on_click el (fun _ ->
@@ -469,20 +557,26 @@ let () =
     in
     let n = List.length !history in
     El.set_children hist_head
-      (El.span ~at:[ cls "hist-title" ] [ txt (Printf.sprintf "History (%d)" n) ]
-       ::
-       (if n = 0 then []
-        else
-          [
-            button ~classes:"btn tiny" ~title:"Forget every remembered paste"
-              "Clear history" (fun () ->
-                history := [];
-                save_history [];
-                render_history ());
-          ]));
+      (El.span
+         ~at:[ cls "hist-title" ]
+         [ txt (Printf.sprintf "History (%d)" n) ]
+      ::
+      (if n = 0 then []
+       else
+         [
+           button ~classes:"btn tiny" ~title:"Forget every remembered paste"
+             "Clear history" (fun () ->
+               history := [];
+               save_history [];
+               render_history ());
+         ]));
     El.set_children history_el
       (if !history = [] then
-         [ El.div ~at:[ cls "hist-empty" ] [ txt "Pastes that yield a pull request are kept here." ] ]
+         [
+           El.div
+             ~at:[ cls "hist-empty" ]
+             [ txt "Pastes that yield a pull request are kept here." ];
+         ]
        else List.map entry_el !history)
   in
 
@@ -505,7 +599,8 @@ let () =
       match Gh.extract_refs raw with
       | [] ->
           say ~bad:true
-            "No pull request links in that text. Paste a github.com link, or owner/repo#12."
+            "No pull request links in that text. Paste a github.com link, or \
+             owner/repo#12."
       | refs ->
           let n = List.length refs in
           say
@@ -539,18 +634,25 @@ let () =
   in
 
   let controls =
-    El.div ~at:[ cls "controls" ]
+    El.div
+      ~at:[ cls "controls" ]
       [
-        button ~classes:"btn primary" ~title:"Load the pull requests found above (Ctrl+Enter)"
-          "Load" load;
+        button ~classes:"btn primary"
+          ~title:"Load the pull requests found above (Ctrl+Enter)" "Load" load;
         button "Expand all" (fun () -> set_all_prs true);
         button "Collapse all" (fun () -> set_all_prs false);
-        button ~title:"Re-fetch every pull request currently shown" "Reload all" (fun () ->
+        button ~title:"Re-fetch every pull request currently shown" "Reload all"
+          (fun () ->
             Urls.iter
               (fun k _ ->
-                match Gh.parse_ref k with Some r -> add_ref ~force:true r | None -> ())
+                match Gh.parse_ref k with
+                | Some r -> add_ref ~force:true r
+                | None -> ())
               !loaded);
-        button ~title:"Remove every pull request from the list. Nothing is sent to GitHub."
+        button
+          ~title:
+            "Remove every pull request from the list. Nothing is sent to \
+             GitHub."
           "Clear" (fun () ->
             El.set_children list_el [];
             loaded := Urls.empty;
@@ -560,9 +662,11 @@ let () =
   in
 
   let header =
-    El.header ~at:[ cls "top" ]
+    El.header
+      ~at:[ cls "top" ]
       [
-        El.div ~at:[ cls "brand" ]
+        El.div
+          ~at:[ cls "brand" ]
           [
             El.h1 [ txt "smashtb" ];
             El.span ~at:[ cls "tag" ] [ txt "review, approve, move on" ];
@@ -572,7 +676,9 @@ let () =
           ~at:[ cls "compose" ]
           [
             input;
-            El.v ~at:[ cls "history-col" ] (Jstr.v "aside") [ hist_head; history_el ];
+            El.v
+              ~at:[ cls "history-col" ]
+              (Jstr.v "aside") [ hist_head; history_el ];
           ];
         controls;
         status;
@@ -592,7 +698,8 @@ let () =
     say "";
     Fut.await (Gh.whoami ~token) (function
       | Ok login -> set_token_state (Works (Some login))
-      | Error e -> set_token_state (Broken ("GitHub turned this token down: " ^ e)))
+      | Error e ->
+          set_token_state (Broken ("GitHub turned this token down: " ^ e)))
   end;
 
   (* The list deliberately starts empty; the history column is what brings a

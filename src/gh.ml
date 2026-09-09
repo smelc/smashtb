@@ -64,7 +64,8 @@ let err_msg e = Jstr.to_string (Jv.Error.message e)
 let error_of_body ~status (body : string) =
   let fallback = Printf.sprintf "HTTP %d" status in
   match Json.decode (Jstr.v body) with
-  | Error _ -> if body = "" then fallback else Printf.sprintf "%s: %s" fallback body
+  | Error _ ->
+      if body = "" then fallback else Printf.sprintf "%s: %s" fallback body
   | Ok j -> (
       match J.str_opt j "message" with
       | None -> fallback
@@ -83,12 +84,15 @@ let request ~token ~meth ?body url : Jv.t fut =
       | Error e -> Fut.return (Error (err_msg e))
       | Ok text -> (
           let text = Jstr.to_string text in
-          if status < 200 || status >= 300 then Fut.return (Error (error_of_body ~status text))
+          if status < 200 || status >= 300 then
+            Fut.return (Error (error_of_body ~status text))
           else if String.trim text = "" then return Jv.null
           else
             match Json.decode (Jstr.v text) with
             | Ok j -> return j
-            | Error e -> Fut.return (Error ("malformed JSON from GitHub: " ^ err_msg e))))
+            | Error e ->
+                Fut.return (Error ("malformed JSON from GitHub: " ^ err_msg e)))
+      )
 
 let get ~token url = request ~token ~meth:"GET" url
 let post ~token ~body url = request ~token ~meth:"POST" ~body url
@@ -98,7 +102,8 @@ let post ~token ~body url = request ~token ~meth:"POST" ~body url
 type file = {
   filename : string;
   previous_filename : string option;
-  status : string;  (** added, removed, modified, renamed, copied, changed, unchanged *)
+  status : string;
+      (** added, removed, modified, renamed, copied, changed, unchanged *)
   additions : int;
   deletions : int;
   patch : string option;  (** absent for binary files and very large diffs *)
@@ -139,8 +144,8 @@ let per_page = 100
 let fetch_files ~token (r : pr_ref) : (file list * bool) fut =
   let rec page n acc =
     let url =
-      Printf.sprintf "%s/repos/%s/%s/pulls/%d/files?per_page=%d&page=%d" api r.owner r.repo
-        r.number per_page n
+      Printf.sprintf "%s/repos/%s/%s/pulls/%d/files?per_page=%d&page=%d" api
+        r.owner r.repo r.number per_page n
     in
     let* j = get ~token url in
     let batch = J.list file_of_json j in
@@ -152,7 +157,9 @@ let fetch_files ~token (r : pr_ref) : (file list * bool) fut =
   page 1 []
 
 let fetch_pr ~token (r : pr_ref) : pr fut =
-  let url = Printf.sprintf "%s/repos/%s/%s/pulls/%d" api r.owner r.repo r.number in
+  let url =
+    Printf.sprintf "%s/repos/%s/%s/pulls/%d" api r.owner r.repo r.number
+  in
   let* j = get ~token url in
   let* files, truncated = fetch_files ~token r in
   return
@@ -163,7 +170,8 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
       state = J.str j "state";
       draft = J.bool j "draft";
       merged = J.bool j "merged";
-      html_url = (match J.str_opt j "html_url" with Some u -> u | None -> ref_url r);
+      html_url =
+        (match J.str_opt j "html_url" with Some u -> u | None -> ref_url r);
       base = J.str (Jv.get j "base") "ref";
       head = J.str (Jv.get j "head") "ref";
       additions = J.int j "additions";
@@ -174,12 +182,14 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
     }
 
 let approve ~token ?(body = "") (r : pr_ref) : unit fut =
-  let url = Printf.sprintf "%s/repos/%s/%s/pulls/%d/reviews" api r.owner r.repo r.number in
+  let url =
+    Printf.sprintf "%s/repos/%s/%s/pulls/%d/reviews" api r.owner r.repo r.number
+  in
   let payload =
     Jv.obj
       (Array.of_list
          (("event", Jv.of_string "APPROVE")
-          :: (if body = "" then [] else [ ("body", Jv.of_string body) ])))
+         :: (if body = "" then [] else [ ("body", Jv.of_string body) ])))
   in
   let* _ = post ~token ~body:(Jstr.to_string (Json.encode payload)) url in
   return ()

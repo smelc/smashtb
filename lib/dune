@@ -1,3 +1,4 @@
 ; Logic with no browser dependency, so that it can be unit-tested natively.
+
 (library
  (name smashtb))
