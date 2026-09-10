@@ -129,6 +129,15 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
+/* A disabled primary button drops its colour entirely rather than sitting
+   there as a faded blue that still reads as the thing to press. */
+.btn.primary:disabled {
+  background: var(--bg-soft);
+  border-color: var(--line);
+  color: var(--fg-mut);
+  font-weight: 400;
+  opacity: 1;
+}
 .btn.tiny { padding: 1px 7px; font-size: 11px; font-weight: 400; }
 
 .status { min-height: 18px; font-size: 12.5px; color: var(--fg-mut); }
@@ -278,6 +287,25 @@ details[open] > summary > .chev { transform: rotate(90deg); }
 .b-warn { color: #9a6700; border-color: #9a6700; }
 
 .actions { display: flex; flex: none; gap: 8px; }
+
+/* Merged or already approved, shown at the right of the header. The empty
+   variant reserves the same width so the buttons line up down the list. */
+.pr-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  cursor: help;
+}
+.pr-status.empty { cursor: default; }
+.pr-status.merged { color: #8250df; }
+.pr-status.approved { color: #1a7f37; }
+@media (prefers-color-scheme: dark) {
+  .pr-status.merged { color: #a371f7; }
+  .pr-status.approved { color: #3fb950; }
+}
 
 .stat { font-family: var(--mono); font-size: 12px; margin-left: 6px; }
 .stat.add { color: #1a7f37; }

@@ -178,6 +178,35 @@ let token_badge () =
   in
   (el, set, state)
 
+(* {1 Status icons}
+
+   Brr creates elements in the HTML namespace, and an <svg> only renders in the
+   SVG one, so the markup is set as innerHTML. Both strings are constants
+   written here, never anything that came back from GitHub. *)
+
+let merged_svg =
+  "<svg viewBox=\"0 0 16 16\" width=\"15\" height=\"15\" \
+   aria-hidden=\"true\"><path d=\"M4.5 5.5 V10.5 M4.5 6.4 C4.5 8.4 6.7 8 9.6 \
+   8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" \
+   stroke-linecap=\"round\"/><circle cx=\"4.5\" cy=\"3.5\" r=\"1.9\" \
+   fill=\"currentColor\"/><circle cx=\"4.5\" cy=\"12.5\" r=\"1.9\" \
+   fill=\"currentColor\"/><circle cx=\"11.5\" cy=\"8\" r=\"1.9\" \
+   fill=\"currentColor\"/></svg>"
+
+let approved_svg =
+  "<svg viewBox=\"0 0 16 16\" width=\"15\" height=\"15\" \
+   aria-hidden=\"true\"><circle cx=\"8\" cy=\"8\" r=\"6.6\" fill=\"none\" \
+   stroke=\"currentColor\" stroke-width=\"1.6\"/><path d=\"M4.9 8.2 6.9 10.3 \
+   11.1 5.9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" \
+   stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+
+let icon ~kind ~tip markup =
+  let el =
+    El.span ~at:[ cls ("pr-status " ^ kind); At.title (Jstr.v tip) ] []
+  in
+  Jv.set (El.to_jv el) "innerHTML" (Jv.of_string markup);
+  el
+
 (* {1 Diff view} *)
 
 let render_diff (f : Gh.file) =
@@ -312,6 +341,19 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
     on_gone pr.pr_ref
   in
 
+  (* Nothing left to approve: either it is already in, or someone's approval
+     already stands. *)
+  let settled =
+    if pr.merged then Some ("merged", "This pull request is already merged.")
+    else
+      match pr.approved_by with
+      | [] -> None
+      | who ->
+          Some
+            ( "approved",
+              Printf.sprintf "Already approved by %s." (String.concat ", " who)
+            )
+  in
   let approve_btn = ref (El.div []) in
   let dismiss_btn = ref (El.div []) in
   let busy b =
@@ -335,6 +377,11 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
               busy false;
               El.set_children !approve_btn [ txt "Approve" ];
               show_error ("Could not approve: " ^ e)));
+  (match settled with
+  | None -> ()
+  | Some (_, tip) ->
+      set_disabled !approve_btn true;
+      El.set_at (Jstr.v "title") (Some (Jstr.v tip)) !approve_btn);
   dismiss_btn :=
     button ~classes:"btn"
       ~title:
@@ -348,7 +395,6 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
         else None)
       [
         (pr.draft, "draft", "b-draft");
-        (pr.merged, "merged", "b-merged");
         (pr.state = "closed" && not pr.merged, "closed", "b-closed");
         (pr.truncated, "file list truncated", "b-warn");
       ]
@@ -388,6 +434,10 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
                   [ txt (Printf.sprintf "-%d" pr.deletions) ];
               ];
           ];
+        (match settled with
+        | None -> El.span ~at:[ cls "pr-status empty" ] []
+        | Some ("merged", tip) -> icon ~kind:"merged" ~tip merged_svg
+        | Some (_, tip) -> icon ~kind:"approved" ~tip approved_svg);
         El.div ~at:[ cls "actions" ] [ !dismiss_btn; !approve_btn ];
       ]
   in

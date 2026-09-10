@@ -125,6 +125,8 @@ type pr = {
   changed_files : int;
   files : file list;
   truncated : bool;  (** [true] when the PR has more files than we fetched *)
+  approved_by : string list;
+      (** logins whose most recent verdict on this PR is an approval *)
 }
 
 let file_of_json j =
@@ -156,12 +158,49 @@ let fetch_files ~token (r : pr_ref) : (file list * bool) fut =
   in
   page 1 []
 
+(* Reviews, oldest first. GitHub keeps every review event, so a reviewer who
+   approved and later asked for changes still has an APPROVED entry in here. *)
+let fetch_reviews ~token (r : pr_ref) : (string * string) list fut =
+  let rec page n acc =
+    let url =
+      Printf.sprintf "%s/repos/%s/%s/pulls/%d/reviews?per_page=%d&page=%d" api
+        r.owner r.repo r.number per_page n
+    in
+    let* j = get ~token url in
+    let batch =
+      J.list (fun v -> (J.str (Jv.get v "user") "login", J.str v "state")) j
+    in
+    let acc = acc @ batch in
+    if List.length batch < per_page || n >= max_pages then return acc
+    else page (n + 1) acc
+  in
+  page 1 []
+
+(* Who currently approves. Only a verdict supersedes an earlier one: a plain
+   COMMENTED review leaves the reviewer's previous stance alone, so those are
+   dropped before the last entry per reviewer is taken. *)
+let approvers (reviews : (string * string) list) : string list =
+  let decisive (_, state) =
+    state = "APPROVED" || state = "CHANGES_REQUESTED" || state = "DISMISSED"
+  in
+  let latest =
+    List.fold_left
+      (fun acc (login, state) -> (login, state) :: List.remove_assoc login acc)
+      []
+      (List.filter decisive reviews)
+  in
+  List.sort compare
+    (List.filter_map
+       (fun (login, state) -> if state = "APPROVED" then Some login else None)
+       latest)
+
 let fetch_pr ~token (r : pr_ref) : pr fut =
   let url =
     Printf.sprintf "%s/repos/%s/%s/pulls/%d" api r.owner r.repo r.number
   in
   let* j = get ~token url in
   let* files, truncated = fetch_files ~token r in
+  let* reviews = fetch_reviews ~token r in
   return
     {
       pr_ref = r;
@@ -179,6 +218,7 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
       changed_files = J.int j "changed_files";
       files;
       truncated;
+      approved_by = approvers reviews;
     }
 
 let approve ~token ?(body = "") (r : pr_ref) : unit fut =
