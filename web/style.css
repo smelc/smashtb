@@ -9,6 +9,7 @@
   --line: #d1d9e0;
   --accent: #0969da;
   --danger: #cf222e;
+  --ok: #1a7f37;
 
   --add-bg: #e6ffec;
   --add-gut: #ccffd8;
@@ -31,6 +32,7 @@
     --line: #3d444d;
     --accent: #4493f8;
     --danger: #f85149;
+    --ok: #3fb950;
 
     --add-bg: #12261e;
     --add-gut: #1b4721;
@@ -282,6 +284,27 @@ details[open] > summary > .chev { transform: rotate(90deg); }
   color: var(--fg);
   cursor: help;
 }
+
+/* A branch name and the button that copies it stay on one line together. */
+.pr-base,
+.pr-branch { white-space: nowrap; }
+
+/* One click puts the branch name on the clipboard, for the checkout that
+   usually comes next. The button turns into a tick to say it worked. */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-mut);
+  vertical-align: text-bottom;
+  cursor: pointer;
+}
+.copy-btn:hover { color: var(--fg); }
+.copy-btn.copied { color: var(--ok); }
+.copy-btn.failed { color: var(--danger); }
 
 .badge {
   padding: 0 7px;

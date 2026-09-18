@@ -131,9 +131,9 @@ type pr = {
   html_url : string;
   base : string;
   head : string;
-  base_is_default : bool;
-      (** whether [base] is the repository's default branch, i.e. whether this
-          pull request lands directly rather than onto another one *)
+  default_branch : string;
+      (** the repository's default branch: a pull request whose [base] is that
+          branch lands directly rather than onto another one *)
   additions : int;
   deletions : int;
   changed_files : int;
@@ -227,9 +227,7 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
         (match J.str_opt j "html_url" with Some u -> u | None -> ref_url r);
       base = J.str (Jv.get j "base") "ref";
       head = J.str (Jv.get j "head") "ref";
-      base_is_default =
-        J.str (Jv.get j "base") "ref"
-        = J.str_path j [ "base"; "repo"; "default_branch" ];
+      default_branch = J.str_path j [ "base"; "repo"; "default_branch" ];
       additions = J.int j "additions";
       deletions = J.int j "deletions";
       changed_files = J.int j "changed_files";

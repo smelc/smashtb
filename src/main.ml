@@ -201,12 +201,90 @@ let approved_svg =
    11.1 5.9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" \
    stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
 
+let set_svg el markup = Jv.set (El.to_jv el) "innerHTML" (Jv.of_string markup)
+
 let icon ~kind ~tip markup =
   let el =
     El.span ~at:[ cls ("pr-status " ^ kind); At.title (Jstr.v tip) ] []
   in
-  Jv.set (El.to_jv el) "innerHTML" (Jv.of_string markup);
+  set_svg el markup;
   el
+
+(* {1 Copying a branch name}
+
+   The two sheets of paper everything uses for "copy": this is GitHub's own
+   copy icon, and the tick that replaces it for a moment afterwards. *)
+
+let copy_svg =
+  "<svg viewBox=\"0 0 16 16\" width=\"13\" height=\"13\" \
+   aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M0 6.75C0 5.784.784 5 \
+   1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 \
+   .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 \
+   1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z\"/><path \
+   fill=\"currentColor\" d=\"M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 \
+   .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 \
+   9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 \
+   .25-.25v-7.5a.25.25 0 0 0-.25-.25Z\"/></svg>"
+
+let copied_svg =
+  "<svg viewBox=\"0 0 16 16\" width=\"13\" height=\"13\" \
+   aria-hidden=\"true\"><path d=\"M3.4 8.6 6.4 11.6 12.6 4.7\" fill=\"none\" \
+   stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" \
+   stroke-linejoin=\"round\"/></svg>"
+
+(* navigator.clipboard only exists in a secure context, which http://localhost
+   is; a page served any other way over http has none, and the button says so
+   rather than failing silently. *)
+let clipboard () =
+  let c = Jv.get (Navigator.to_jv G.navigator) "clipboard" in
+  if Jv.is_none c then None
+  else Some (Brr_io.Clipboard.of_navigator G.navigator)
+
+let copy_button text =
+  let tip = Printf.sprintf "Copy %s to the clipboard" text in
+  let b =
+    El.button
+      ~at:[ cls "copy-btn"; attr "type" "button"; At.title (Jstr.v tip) ]
+      []
+  in
+  set_svg b copy_svg;
+  let timer = ref None in
+  let reset () =
+    set_svg b copy_svg;
+    El.set_class (Jstr.v "copied") false b;
+    El.set_class (Jstr.v "failed") false b;
+    El.set_at (Jstr.v "title") (Some (Jstr.v tip)) b
+  in
+  (* The button says what happened for a moment, then goes back to offering
+     the copy again. *)
+  let flash outcome said =
+    Option.iter G.stop_timer !timer;
+    El.set_class (Jstr.v outcome) true b;
+    El.set_at (Jstr.v "title") (Some (Jstr.v said)) b;
+    if outcome = "copied" then set_svg b copied_svg;
+    timer := Some (G.set_timeout ~ms:1400 reset)
+  in
+  on_click b (fun ev ->
+      Ev.stop_propagation ev;
+      Ev.prevent_default ev;
+      match clipboard () with
+      | None ->
+          flash "failed" "This browser will not give the page a clipboard."
+      | Some clip ->
+          Fut.await
+            (Brr_io.Clipboard.write_text clip (Jstr.v text))
+            (function
+              | Ok () -> flash "copied" (Printf.sprintf "Copied %s" text)
+              | Error e ->
+                  flash "failed"
+                    ("Could not copy: " ^ Jstr.to_string (Jv.Error.message e))));
+  b
+
+(* A branch name as it appears in a card's second line. The default branch is
+   the one nobody needs to copy: it is where everything lands anyway. *)
+let branch_els ~default_branch name =
+  txt name
+  :: (if name = "" || name = default_branch then [] else [ copy_button name ])
 
 (* {1 Diff view} *)
 
@@ -300,12 +378,13 @@ let render_file (f : Gh.file) =
    can be read off the line: [set_parent] is called again every time the page
    learns of another pull request. *)
 let render_base (pr : Gh.pr) =
-  let el = El.span ~at:[ cls "pr-base" ] [ txt pr.base ] in
+  let name () = branch_els ~default_branch:pr.default_branch pr.base in
+  let el = El.span ~at:[ cls "pr-base" ] (name ()) in
   let set_parent (p : Pr_order.t option) =
     El.set_children el
-      (txt pr.base
-      ::
-      (match p with
+      (name ()
+      @
+      match p with
       | None -> []
       | Some p ->
           [
@@ -322,7 +401,7 @@ let render_base (pr : Gh.pr) =
                           pr.base p.owner p.repo p.number));
                 ]
               [ txt (Printf.sprintf " (PR #%d)" p.number) ];
-          ]))
+          ])
   in
   (el, set_parent)
 
@@ -458,7 +537,11 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
               [
                 txt (Printf.sprintf "by %s \xc2\xb7 " pr.author);
                 base_el;
-                txt (Printf.sprintf " \xe2\x86\x90 %s \xc2\xb7 " pr.head);
+                txt " \xe2\x86\x90 ";
+                El.span
+                  ~at:[ cls "pr-branch" ]
+                  (branch_els ~default_branch:pr.default_branch pr.head);
+                txt " \xc2\xb7 ";
                 El.span
                   ~at:[ cls "stat add" ]
                   [ txt (Printf.sprintf "+%d" pr.additions) ];
@@ -502,7 +585,7 @@ let order_of_pr (pr : Gh.pr) =
     number = pr.pr_ref.number;
     base = pr.base;
     head = pr.head;
-    base_is_default = pr.base_is_default;
+    base_is_default = String.equal pr.base pr.default_branch;
   }
 
 let () =
