@@ -154,6 +154,63 @@ let () =
 
   check "empty patch" (Diff.parse "" = []);
 
+  (* Merge order: a pull request aimed at the default branch comes first, one
+     stacked on it next, and ties go to the smaller number. *)
+  let pr ?(base = "main") ?(head = "") ?(default = true) number =
+    {
+      Pr_order.owner = "o";
+      repo = "r";
+      number;
+      base;
+      head = (if head = "" then Printf.sprintf "b%d" number else head);
+      base_is_default = default;
+    }
+  in
+  let order name prs expected =
+    let got =
+      List.map (fun (p : Pr_order.t) -> p.number) (Pr_order.sort Fun.id prs)
+    in
+    if got <> expected then begin
+      incr failures;
+      Printf.printf "FAIL %s: [%s], expected [%s]\n" name
+        (String.concat "; " (List.map string_of_int got))
+        (String.concat "; " (List.map string_of_int expected))
+    end
+  in
+  let stacked number ~on =
+    pr ~base:(Printf.sprintf "b%d" on) ~default:false number
+  in
+  order "a stack reads in merge order"
+    [ stacked 4 ~on:3; pr 2; stacked 3 ~on:2 ]
+    [ 2; 3; 4 ];
+  order "ties go to the smaller number" [ pr 4; pr 3 ] [ 3; 4 ];
+  order "stacks interleave by depth"
+    [ stacked 5 ~on:1; pr 6; pr 1; stacked 2 ~on:6 ]
+    [ 1; 6; 2; 5 ];
+  order "an untraceable base goes last"
+    [ pr ~base:"someone-elses-branch" ~default:false 1; pr 9 ]
+    [ 9; 1 ];
+  order "a pull request still loading goes last"
+    [ Pr_order.pending { Pr_url.owner = "o"; repo = "r"; number = 1 }; pr 9 ]
+    [ 9; 1 ];
+  order "branches of another repository do not match"
+    [ { (stacked 5 ~on:1) with owner = "other" }; pr 1 ]
+    [ 1; 5 ];
+  order "a cycle lands nowhere"
+    [
+      pr ~base:"b2" ~head:"b1" ~default:false 1;
+      pr ~base:"b1" ~head:"b2" ~default:false 2;
+    ]
+    [ 1; 2 ];
+  check "parent of a stacked pull request"
+    (match Pr_order.parent [ pr 2; stacked 3 ~on:2 ] (stacked 3 ~on:2) with
+    | Some p -> p.number = 2
+    | None -> false);
+  check "no parent when the base is the default branch"
+    (Pr_order.parent [ pr 2; pr 3 ] (pr 3) = None);
+  check "no parent when the base is nobody's branch"
+    (Pr_order.parent [ pr 2 ] (stacked 3 ~on:7) = None);
+
   if !failures = 0 then print_endline "all tests passed"
   else begin
     Printf.printf "%d test(s) failed\n" !failures;

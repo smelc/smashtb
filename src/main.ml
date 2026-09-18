@@ -4,6 +4,7 @@
 
 open Brr
 module Diff = Smashtb.Diff
+module Pr_order = Smashtb.Pr_order
 
 let cls c = At.class' (Jstr.v c)
 let txt = El.txt'
@@ -294,6 +295,37 @@ let render_file (f : Gh.file) =
 
 (* {1 One pull request, foldable} *)
 
+(* The branch a pull request lands on. When that branch is carried by another
+   pull request on the page, its number is shown next to it, so that a stack
+   can be read off the line: [set_parent] is called again every time the page
+   learns of another pull request. *)
+let render_base (pr : Gh.pr) =
+  let el = El.span ~at:[ cls "pr-base" ] [ txt pr.base ] in
+  let set_parent (p : Pr_order.t option) =
+    El.set_children el
+      (txt pr.base
+      ::
+      (match p with
+      | None -> []
+      | Some p ->
+          [
+            El.span
+              ~at:
+                [
+                  cls "pr-parent";
+                  At.title
+                    (Jstr.v
+                       (Printf.sprintf
+                          "%s is the branch of %s/%s#%d, which is on this page \
+                           too: this pull request only lands once that one \
+                           does."
+                          pr.base p.owner p.repo p.number));
+                ]
+              [ txt (Printf.sprintf " (PR #%d)" p.number) ];
+          ]))
+  in
+  (el, set_parent)
+
 let render_pr ~token ~(on_api : (unit, string) result -> unit)
     ~(on_gone : Gh.pr_ref -> unit) (pr : Gh.pr) =
   let files = List.map render_file pr.files in
@@ -388,6 +420,7 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
         "Remove this PR from the list without approving it. Nothing is sent to \
          GitHub." "Dismiss" (fun () -> gone ());
 
+  let base_el, set_parent = render_base pr in
   let badges =
     List.filter_map
       (fun (b, label, c) ->
@@ -423,9 +456,9 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
             El.div
               ~at:[ cls "pr-line2" ]
               [
-                txt
-                  (Printf.sprintf "by %s \xc2\xb7 %s \xe2\x86\x90 %s \xc2\xb7 "
-                     pr.author pr.base pr.head);
+                txt (Printf.sprintf "by %s \xc2\xb7 " pr.author);
+                base_el;
+                txt (Printf.sprintf " \xe2\x86\x90 %s \xc2\xb7 " pr.head);
                 El.span
                   ~at:[ cls "stat add" ]
                   [ txt (Printf.sprintf "+%d" pr.additions) ];
@@ -443,7 +476,7 @@ let render_pr ~token ~(on_api : (unit, string) result -> unit)
   in
   El.set_children card
     [ head; El.div ~at:[ cls "pr-body" ] [ error_box; files_block ] ];
-  card
+  (card, set_parent)
 
 (* {1 Shell} *)
 
@@ -451,6 +484,26 @@ let loading_card (r : Gh.pr_ref) =
   El.div
     ~at:[ cls "pr placeholder" ]
     [ txt (Printf.sprintf "Loading %s\xe2\x80\xa6" (Gh.ref_to_string r)) ]
+
+(* One pull request's place in the list: the element it lives in, where it
+   belongs in the merge order, and how to tell it which pull request carries
+   the branch it targets. Everything but the element is provisional until
+   GitHub has answered. *)
+type slot = {
+  el : El.t;
+  order : Pr_order.t;
+  set_parent : Pr_order.t option -> unit;
+}
+
+let order_of_pr (pr : Gh.pr) =
+  {
+    Pr_order.owner = pr.pr_ref.owner;
+    repo = pr.pr_ref.repo;
+    number = pr.pr_ref.number;
+    base = pr.base;
+    head = pr.head;
+    base_is_default = pr.base_is_default;
+  }
 
 let () =
   let doc_body = Document.body G.document in
@@ -460,7 +513,7 @@ let () =
   let badge, set_token_state, token_status = token_badge () in
   (* url -> the slot showing that pull request, so a card can be found again to
      replace or remove it. *)
-  let loaded = ref Urls.empty in
+  let loaded : slot Urls.t ref = ref Urls.empty in
   (* Fetches in flight, so the "Loading..." line can clear once they settle. *)
   let pending = ref 0 in
   let list_el = El.div ~at:[ cls "list" ] [] in
@@ -485,8 +538,25 @@ let () =
     El.set_class (Jstr.v "hidden") (not (Urls.is_empty !loaded)) empty_hint
   in
 
+  (* Lay the list out in merge order, and tell each pull request which loaded
+     one, if any, carries the branch it targets. Both answers depend on the
+     whole list, so this runs again every time a pull request arrives. *)
+  let reorder () =
+    let slots = List.map snd (Urls.bindings !loaded) in
+    let orders = List.map (fun s -> s.order) slots in
+    List.iter (fun s -> s.set_parent (Pr_order.parent orders s.order)) slots;
+    El.set_children list_el
+      (List.map (fun s -> s.el) (Pr_order.sort (fun s -> s.order) slots))
+  in
+
+  (* Dropping a pull request leaves the others where they are: re-deriving the
+     order here would shuffle anything stacked on the one that just went. *)
   let forget r =
-    loaded := Urls.remove (Gh.ref_url r) !loaded;
+    let key = Gh.ref_url r in
+    (match Urls.find_opt key !loaded with
+    | Some slot -> El.remove slot.el
+    | None -> ());
+    loaded := Urls.remove key !loaded;
     refresh_list ();
     say (Printf.sprintf "%s removed from the list." (Gh.ref_to_string r))
   in
@@ -524,50 +594,65 @@ let () =
     else begin
       let slot =
         match Urls.find_opt key !loaded with
-        | Some slot -> slot
+        (* A reload keeps the place the pull request already holds, rather
+           than sending it to the bottom for as long as the fetch takes. *)
+        | Some slot -> { slot with set_parent = ignore }
         | None ->
-            let slot = El.div ~at:[ cls "slot" ] [] in
-            loaded := Urls.add key slot !loaded;
-            El.append_children list_el [ slot ];
-            slot
+            {
+              el = El.div ~at:[ cls "slot" ] [];
+              order = Pr_order.pending r;
+              set_parent = ignore;
+            }
       in
-      El.set_children slot [ loading_card r ];
+      loaded := Urls.add key slot !loaded;
+      El.set_children slot.el [ loading_card r ];
       refresh_list ();
+      reorder ();
       incr pending;
       let settled () =
         decr pending;
         if !pending = 0 then say ""
       in
+      (* A pull request dismissed while its fetch was in flight stays gone. *)
+      let listed () = Urls.mem key !loaded in
       Fut.await (Gh.fetch_pr ~token r) (function
         | Ok pr ->
             settled ();
             on_api (Ok ());
-            El.set_children slot [ render_pr ~token ~on_api ~on_gone:forget pr ]
+            if listed () then begin
+              let card, set_parent =
+                render_pr ~token ~on_api ~on_gone:forget pr
+              in
+              El.set_children slot.el [ card ];
+              loaded :=
+                Urls.add key
+                  { slot with order = order_of_pr pr; set_parent }
+                  !loaded;
+              reorder ()
+            end
         | Error e ->
             settled ();
             on_api (Error e);
-            let retry = button "Retry" (fun () -> add_ref ~force:true r) in
-            let drop =
-              button "Remove" (fun () ->
-                  El.remove slot;
-                  forget r)
-            in
-            El.set_children slot
-              [
-                El.div
-                  ~at:[ cls "pr failed" ]
-                  [
-                    El.div
-                      ~at:[ cls "pr-line1" ]
-                      [
-                        El.span
-                          ~at:[ cls "pr-num" ]
-                          [ txt (Gh.ref_to_string r) ];
-                      ];
-                    El.div ~at:[ cls "error" ] [ txt e ];
-                    El.div ~at:[ cls "actions" ] [ retry; drop ];
-                  ];
-              ])
+            if listed () then begin
+              let retry = button "Retry" (fun () -> add_ref ~force:true r) in
+              let drop = button "Remove" (fun () -> forget r) in
+              El.set_children slot.el
+                [
+                  El.div
+                    ~at:[ cls "pr failed" ]
+                    [
+                      El.div
+                        ~at:[ cls "pr-line1" ]
+                        [
+                          El.span
+                            ~at:[ cls "pr-num" ]
+                            [ txt (Gh.ref_to_string r) ];
+                        ];
+                      El.div ~at:[ cls "error" ] [ txt e ];
+                      El.div ~at:[ cls "actions" ] [ retry; drop ];
+                    ];
+                ]
+            end)
     end
   in
 

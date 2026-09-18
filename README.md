@@ -56,6 +56,14 @@ changed files folds too, as does every individual file. Diffs are only built
 when you open a file, so a pull request touching hundreds of files still opens
 instantly.
 
+Cards are ordered by how close they are to landing, not by the order you
+pasted them: the ones targeting the default branch come first, then the ones
+stacked on those, and so on down the stack. Pull requests at the same depth go
+in number order, smallest first, and anything whose base is neither the default
+branch nor a branch on the page goes last. A stacked pull request names what it
+waits on, next to the branch it targets: `by alice · feature-a (PR #12) ←
+feature-b`.
+
 **Approve** posts an approving review through the API and then removes the card.
 **Dismiss** only removes the card: nothing is sent to GitHub, and the pull
 request keeps whatever review state it already had. Both leave the list shorter,

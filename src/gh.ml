@@ -33,6 +33,17 @@ module J = struct
     if Jv.is_none v then false else Jv.to_bool v
 
   let list f j = if Jv.is_none j then [] else Jv.to_list f j
+
+  (* A string reached through nested objects, tolerating a missing step: the
+     repository behind a pull request's base is absent when it has been
+     deleted. *)
+  let str_path j path =
+    let rec go j = function
+      | _ when Jv.is_none j -> ""
+      | [] -> Jstr.to_string (Jv.to_jstr j)
+      | n :: tl -> go (Jv.get j n) tl
+    in
+    go j path
 end
 
 (* {1 Pull request references} *)
@@ -120,6 +131,9 @@ type pr = {
   html_url : string;
   base : string;
   head : string;
+  base_is_default : bool;
+      (** whether [base] is the repository's default branch, i.e. whether this
+          pull request lands directly rather than onto another one *)
   additions : int;
   deletions : int;
   changed_files : int;
@@ -213,6 +227,9 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
         (match J.str_opt j "html_url" with Some u -> u | None -> ref_url r);
       base = J.str (Jv.get j "base") "ref";
       head = J.str (Jv.get j "head") "ref";
+      base_is_default =
+        J.str (Jv.get j "base") "ref"
+        = J.str_path j [ "base"; "repo"; "default_branch" ];
       additions = J.int j "additions";
       deletions = J.int j "deletions";
       changed_files = J.int j "changed_files";
