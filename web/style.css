@@ -251,7 +251,9 @@ a:hover { text-decoration: underline; }
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
-  overflow: hidden;
+  /* clip, not hidden: hidden would make the card a scroll container and stop
+     its header from sticking. */
+  overflow: clip;
 }
 .pr.placeholder, .pr.failed { padding: 14px 16px; color: var(--fg-mut); }
 
@@ -267,7 +269,18 @@ a:hover { text-decoration: underline; }
 .files-head::-webkit-details-marker,
 .file-head::-webkit-details-marker { display: none; }
 
-.pr-head { padding: 12px 16px; background: var(--bg-soft); }
+/* While its files scroll by, a card's header sticks just under the page
+   header, so Dismiss and Approve stay in reach. --top-h is the page header's
+   height, kept up to date from main.ml. */
+.pr-head {
+  position: sticky;
+  top: var(--top-h, 0px);
+  z-index: 5;
+  padding: 12px 16px;
+  background: var(--bg-soft);
+}
+/* The divider belongs to the header so it travels with it when stuck. */
+.pr[open] > .pr-head { border-bottom: 1px solid var(--line); }
 .pr-head:hover { background: var(--bg-sunk); }
 
 .chev {
@@ -364,7 +377,6 @@ details[open] > summary > .chev { transform: rotate(90deg); }
 
 /* ---------- file list ---------- */
 
-.pr-body { border-top: 1px solid var(--line); }
 .files-head { padding: 8px 16px; font-size: 12.5px; color: var(--fg-mut); }
 .files-head:hover { background: var(--bg-soft); }
 .files-title { flex: 1 1 auto; font-weight: 600; color: var(--fg); }

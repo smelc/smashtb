@@ -240,6 +240,21 @@ let clipboard () =
   if Jv.is_none c then None
   else Some (Brr_io.Clipboard.of_navigator G.navigator)
 
+(* Publish [el]'s height as --top-h on the root element, and keep it current
+   as it changes (the input can be resized, the status line can wrap). The pull
+   request headers stick right below it. *)
+let track_height el =
+  let set () =
+    El.set_inline_style (Jstr.v "--top-h")
+      (Jstr.v (Printf.sprintf "%gpx" (El.bound_h el)))
+      (Document.root G.document)
+  in
+  set ();
+  let ro = Jv.get Jv.global "ResizeObserver" in
+  if not (Jv.is_none ro) then
+    let obs = Jv.new' ro [| Jv.callback ~arity:1 (fun _ -> set ()) |] in
+    ignore (Jv.call obs "observe" [| El.to_jv el |])
+
 let copy_button text =
   let tip = Printf.sprintf "Copy %s to the clipboard" text in
   let b =
@@ -913,6 +928,7 @@ let () =
       ]
   in
   El.set_children doc_body [ header; empty_hint; list_el ];
+  track_height header;
   render_history ();
 
   if token = "" then begin
