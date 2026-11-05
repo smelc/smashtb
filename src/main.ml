@@ -825,8 +825,7 @@ let () =
             (Printf.sprintf "Found %d %s\xe2\x80\xa6" n
                (plural n "pull request" "pull requests"));
           List.iter (fun r -> add_ref r) refs;
-          remember raw refs;
-          El.set_prop El.Prop.value Jstr.empty input
+          remember raw refs
   in
 
   (* Ctrl+Enter (Cmd+Enter on a Mac) anywhere on the page presses Load, so a
@@ -851,12 +850,25 @@ let () =
          (Jstr.v "details.pr") ())
   in
 
+  let clear_list () =
+    El.set_children list_el [];
+    loaded := Urls.empty;
+    refresh_list ()
+  in
+
   let controls =
     El.div
       ~at:[ cls "controls" ]
       [
         button ~classes:"btn primary"
           ~title:"Load the pull requests found above (Ctrl+Enter)" "Load" load;
+        button ~classes:"btn danger"
+          ~title:
+            "Empty the pull request list, then load the pull requests found \
+             above"
+          "Clear & Load" (fun () ->
+            clear_list ();
+            load ());
         button "Expand all" (fun () -> set_all_prs true);
         button "Collapse all" (fun () -> set_all_prs false);
         button ~title:"Re-fetch every pull request currently shown" "Reload all"
@@ -867,14 +879,12 @@ let () =
                 | Some r -> add_ref ~force:true r
                 | None -> ())
               !loaded);
-        button
+        button ~classes:"btn danger"
           ~title:
             "Remove every pull request from the list. Nothing is sent to \
              GitHub."
-          "Clear" (fun () ->
-            El.set_children list_el [];
-            loaded := Urls.empty;
-            refresh_list ();
+          "Clear \xf0\x9f\x91\x87" (fun () ->
+            clear_list ();
             say "List cleared.");
       ]
   in
