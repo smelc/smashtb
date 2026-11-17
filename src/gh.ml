@@ -5,46 +5,10 @@
 
 open Brr
 open Brr_io
+module J = Jread
 
-type 'a fut = ('a, string) result Fut.t
-
-let ( let* ) x f =
-  Fut.bind x (function Error e -> Fut.return (Error e) | Ok v -> f v)
-
-let return v = Fut.return (Ok v)
-
-(* {1 Reading JSON without a codec library} *)
-
-module J = struct
-  let str ?(default = "") j n =
-    let v = Jv.get j n in
-    if Jv.is_none v then default else Jstr.to_string (Jv.to_jstr v)
-
-  let str_opt j n =
-    let v = Jv.get j n in
-    if Jv.is_none v then None else Some (Jstr.to_string (Jv.to_jstr v))
-
-  let int ?(default = 0) j n =
-    let v = Jv.get j n in
-    if Jv.is_none v then default else Jv.to_int v
-
-  let bool j n =
-    let v = Jv.get j n in
-    if Jv.is_none v then false else Jv.to_bool v
-
-  let list f j = if Jv.is_none j then [] else Jv.to_list f j
-
-  (* A string reached through nested objects, tolerating a missing step: the
-     repository behind a pull request's base is absent when it has been
-     deleted. *)
-  let str_path j path =
-    let rec go j = function
-      | _ when Jv.is_none j -> ""
-      | [] -> Jstr.to_string (Jv.to_jstr j)
-      | n :: tl -> go (Jv.get j n) tl
-    in
-    go j path
-end
+let ( let* ) = Task.( let* )
+let return = Task.return
 
 (* {1 Pull request references} *)
 
@@ -68,7 +32,7 @@ let headers token =
       (Jstr.v "X-GitHub-Api-Version", Jstr.v "2022-11-28");
     ]
 
-let err_msg e = Jstr.to_string (Jv.Error.message e)
+let err_msg = Task.error_message
 
 (* GitHub error bodies look like {"message": "...", "errors": [...]}.  Surface
    the message when there is one, the raw status otherwise. *)
@@ -82,7 +46,7 @@ let error_of_body ~status (body : string) =
       | None -> fallback
       | Some m -> Printf.sprintf "%s (HTTP %d)" m status)
 
-let request ~token ~meth ?body url : Jv.t fut =
+let request ~token ~meth ?body url : Jv.t Task.t =
   let body = Option.map (fun b -> Fetch.Body.of_jstr (Jstr.v b)) body in
   let init =
     Fetch.Request.init ~method':(Jstr.v meth) ~headers:(headers token) ?body ()
@@ -157,7 +121,7 @@ let file_of_json j =
 let max_pages = 10
 let per_page = 100
 
-let fetch_files ~token (r : pr_ref) : (file list * bool) fut =
+let fetch_files ~token (r : pr_ref) : (file list * bool) Task.t =
   let rec page n acc =
     let url =
       Printf.sprintf "%s/repos/%s/%s/pulls/%d/files?per_page=%d&page=%d" api
@@ -174,7 +138,7 @@ let fetch_files ~token (r : pr_ref) : (file list * bool) fut =
 
 (* Reviews, oldest first. GitHub keeps every review event, so a reviewer who
    approved and later asked for changes still has an APPROVED entry in here. *)
-let fetch_reviews ~token (r : pr_ref) : (string * string) list fut =
+let fetch_reviews ~token (r : pr_ref) : (string * string) list Task.t =
   let rec page n acc =
     let url =
       Printf.sprintf "%s/repos/%s/%s/pulls/%d/reviews?per_page=%d&page=%d" api
@@ -190,25 +154,7 @@ let fetch_reviews ~token (r : pr_ref) : (string * string) list fut =
   in
   page 1 []
 
-(* Who currently approves. Only a verdict supersedes an earlier one: a plain
-   COMMENTED review leaves the reviewer's previous stance alone, so those are
-   dropped before the last entry per reviewer is taken. *)
-let approvers (reviews : (string * string) list) : string list =
-  let decisive (_, state) =
-    state = "APPROVED" || state = "CHANGES_REQUESTED" || state = "DISMISSED"
-  in
-  let latest =
-    List.fold_left
-      (fun acc (login, state) -> (login, state) :: List.remove_assoc login acc)
-      []
-      (List.filter decisive reviews)
-  in
-  List.sort compare
-    (List.filter_map
-       (fun (login, state) -> if state = "APPROVED" then Some login else None)
-       latest)
-
-let fetch_pr ~token (r : pr_ref) : pr fut =
+let fetch_pr ~token (r : pr_ref) : pr Task.t =
   let url =
     Printf.sprintf "%s/repos/%s/%s/pulls/%d" api r.owner r.repo r.number
   in
@@ -233,10 +179,10 @@ let fetch_pr ~token (r : pr_ref) : pr fut =
       changed_files = J.int j "changed_files";
       files;
       truncated;
-      approved_by = approvers reviews;
+      approved_by = Smashtb.Reviews.approvers reviews;
     }
 
-let approve ~token ?(body = "") (r : pr_ref) : unit fut =
+let approve ~token ?(body = "") (r : pr_ref) : unit Task.t =
   let url =
     Printf.sprintf "%s/repos/%s/%s/pulls/%d/reviews" api r.owner r.repo r.number
   in
@@ -250,7 +196,7 @@ let approve ~token ?(body = "") (r : pr_ref) : unit fut =
   return ()
 
 (* The token's own login, used to show who reviews are attributed to. *)
-let whoami ~token : string fut =
+let whoami ~token : string Task.t =
   let* j = get ~token (api ^ "/user") in
   return (J.str j "login")
 

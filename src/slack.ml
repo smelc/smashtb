@@ -13,10 +13,10 @@
 
 open Brr
 open Brr_io
-module J = Gh.J
+module J = Jread
 
-let ( let* ) = Gh.( let* )
-let return = Gh.return
+let ( let* ) = Task.( let* )
+let return = Task.return
 
 (* [true] when run.sh found both tokens. The page never sees the tokens
    themselves. *)
@@ -28,7 +28,7 @@ let configured () =
 
 (* The custom header is what keeps other web sites out: they cannot set it on a
    request to localhost without a preflight, and run.sh answers none. *)
-let post path params : Jv.t Gh.fut =
+let post path params : Jv.t Task.t =
   let headers =
     Fetch.Headers.of_assoc
       [
@@ -44,11 +44,11 @@ let post path params : Jv.t Gh.fut =
   in
   let init = Fetch.Request.init ~method':(Jstr.v "POST") ~headers ~body () in
   Fut.bind (Fetch.url ~init (Jstr.v path)) @@ function
-  | Error e -> Fut.return (Error (Gh.err_msg e))
+  | Error e -> Fut.return (Error (Task.error_message e))
   | Ok resp -> (
       let status = Fetch.Response.status resp in
       Fut.bind (Fetch.Body.text (Fetch.Response.as_body resp)) @@ function
-      | Error e -> Fut.return (Error (Gh.err_msg e))
+      | Error e -> Fut.return (Error (Task.error_message e))
       | Ok text -> (
           match Json.decode text with
           | Error _ ->
@@ -235,8 +235,6 @@ let ack ws envelope_id =
   Websocket.send_string ws (Json.encode j)
 
 type t = { take_over : unit -> unit }
-(** [take_over ()] moves the connection to this tab, from whichever tab has it.
-*)
 
 (* A Promise that never settles: returned from a Web Lock callback, it keeps
    the lock for as long as the page lives, or until another tab steals it. *)

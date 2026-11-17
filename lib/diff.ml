@@ -24,8 +24,6 @@ type line = {
   text : string;
 }
 
-type stats = { added : int; removed : int }
-
 (* "@@ -old[,count] +new[,count] @@ section" -> (old, new) *)
 let parse_hunk_header s =
   let n = String.length s in

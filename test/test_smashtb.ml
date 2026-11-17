@@ -211,6 +211,39 @@ let () =
   check "no parent when the base is nobody's branch"
     (Pr_order.parent [ pr 2 ] (stacked 3 ~on:7) = None);
 
+  (* Reviews *)
+  let approvers name reviews expected =
+    let got = Reviews.approvers reviews in
+    if got <> expected then begin
+      incr failures;
+      Printf.printf "FAIL %s: [%s], expected [%s]\n" name
+        (String.concat "; " got)
+        (String.concat "; " expected)
+    end
+  in
+  approvers "no reviews" [] [];
+  approvers "one approval" [ ("a", "APPROVED") ] [ "a" ];
+  approvers "sorted" [ ("b", "APPROVED"); ("a", "APPROVED") ] [ "a"; "b" ];
+  approvers "approved twice counts once"
+    [ ("a", "APPROVED"); ("a", "APPROVED") ]
+    [ "a" ];
+  approvers "changes requested after approving"
+    [ ("a", "APPROVED"); ("a", "CHANGES_REQUESTED") ]
+    [];
+  approvers "approved after requesting changes"
+    [ ("a", "CHANGES_REQUESTED"); ("a", "APPROVED") ]
+    [ "a" ];
+  approvers "a comment keeps the approval"
+    [ ("a", "APPROVED"); ("a", "COMMENTED") ]
+    [ "a" ];
+  approvers "dismissed" [ ("a", "APPROVED"); ("a", "DISMISSED") ] [];
+  approvers "pending is not a verdict"
+    [ ("a", "APPROVED"); ("a", "PENDING") ]
+    [ "a" ];
+  approvers "each reviewer on their own"
+    [ ("a", "APPROVED"); ("b", "CHANGES_REQUESTED"); ("b", "COMMENTED") ]
+    [ "a" ];
+
   (* Slack message markup *)
   let plain name ?user input expected =
     let got = Slack_text.plain ?user input in

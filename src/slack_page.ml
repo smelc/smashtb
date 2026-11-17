@@ -9,7 +9,7 @@
 open Brr
 open Ui
 module Config = Slack_config
-module Smap = Config.Smap
+module Smap = Map.Make (String)
 
 (* How many of each channel's latest messages the pattern is tried on. *)
 let history_n = 16
@@ -36,6 +36,7 @@ let step_of_hash = function
   | _ -> None
 
 let go hash = Jv.set (Jv.get Jv.global "location") "hash" (Jv.of_string hash)
+let go_to step = go (hash_of_step step)
 
 let contains ~sub s =
   let n = String.length sub and m = String.length s in
@@ -72,7 +73,7 @@ type t = { el : El.t; show : step -> unit }
 
 (* [me] is the workspace the user token belongs to. [config] is shared with
    the live listener, which reads it afresh for every message. *)
-let create ~(me : Slack.me Gh.fut) ~config =
+let create ~(me : Slack.me Task.t) ~config =
   let set c =
     config := c;
     Config.save c
@@ -152,7 +153,7 @@ let create ~(me : Slack.me Gh.fut) ~config =
           [
             button "Back to pull requests" (fun () -> go "");
             button ~classes:"btn primary" "Next: pattern \xe2\x86\x92"
-              (fun () -> go (hash_of_step Pattern));
+              (fun () -> go_to Pattern);
           ];
       ];
     let both =
@@ -236,8 +237,8 @@ let create ~(me : Slack.me Gh.fut) ~config =
           ]
         ()
     in
-    El.set_prop El.Prop.value (Jstr.v !config.Config.pattern) input;
-    let case = checkbox !config.ignore_case in
+    El.set_prop El.Prop.value (Jstr.v (Config.pattern !config)) input;
+    let case = checkbox (Config.ignore_case !config) in
     let error = El.div [] in
     let results = El.div ~at:[ cls "sp-results" ] [] in
     (* By channel id: [None] while its history is on its way. *)
@@ -395,10 +396,10 @@ let create ~(me : Slack.me Gh.fut) ~config =
             :: blocks)
     in
     when_typed input (fun () ->
-        set { !config with pattern = value input };
+        set (Config.with_pattern !config (value input));
         render ());
     when_changed case (fun () ->
-        set { !config with ignore_case = El.prop El.Prop.checked case };
+        set (Config.with_ignore_case !config (El.prop El.Prop.checked case));
         render ());
     El.set_children body
       [
@@ -427,8 +428,7 @@ let create ~(me : Slack.me Gh.fut) ~config =
         results;
         nav
           [
-            button "\xe2\x86\x90 Channels" (fun () ->
-                go (hash_of_step Channels));
+            button "\xe2\x86\x90 Channels" (fun () -> go_to Channels);
             button ~classes:"btn primary"
               "Next: back to pull requests \xe2\x86\x92" (fun () -> go "");
           ];

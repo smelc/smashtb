@@ -612,9 +612,13 @@ let slack_svg =
 
 (* [on_match me m ~channel] is told about every message, not written by the
    user, from a watched channel that matches the pattern, [channel] being its
-   name. *)
+   name. The result redraws the badge, whose text says what [config] watches:
+   call it after changing [config]. *)
 let start_slack ~me ~config ~on_match set_state badge =
-  if not (Slack.configured ()) then El.set_class (Jstr.v "hidden") true badge
+  if not (Slack.configured ()) then begin
+    El.set_class (Jstr.v "hidden") true badge;
+    ignore
+  end
   else begin
     (* What auth.test said about the user token: unknown until it answers.
        A refusal outranks a working socket, which only proves the app-level
@@ -634,7 +638,7 @@ let start_slack ~me ~config ~on_match set_state badge =
           let n = List.length (Slack_config.watched_anywhere c) in
           let watching =
             if n = 0 then "No channel is watched yet."
-            else if String.trim c.Slack_config.pattern = "" then
+            else if String.trim (Slack_config.pattern c) = "" then
               "No pattern is set yet."
             else
               Printf.sprintf "%d %s matched so far in %d watched %s." !matched
@@ -667,7 +671,7 @@ let start_slack ~me ~config ~on_match set_state badge =
       button ~classes:"btn tiny"
         ~title:"Choose the channels to watch and the pattern to look for"
         "Configure Slack \xe2\x9a\x99\xef\xb8\x8f" (fun () ->
-          Slack_page.go (Slack_page.hash_of_step Channels))
+          Slack_page.go_to Channels)
     in
     let state = ref Slack.Connecting in
     let show_ref = ref (fun _ -> ()) in
@@ -734,7 +738,8 @@ let start_slack ~me ~config ~on_match set_state badge =
             on_match me m ~channel
           end)
     in
-    take_over := slack.take_over
+    take_over := slack.take_over;
+    fun () -> show !state
   end
 
 let () =
@@ -1111,6 +1116,8 @@ let () =
   El.set_children doc_body [ header; empty_hint; list_el; slack_page.el ];
   track_height header;
 
+  (* Redraws the Slack badge, once Slack is started below. *)
+  let refresh_slack = ref ignore in
   (* The Slack page replaces the rest while the address ends in #slack... *)
   let route () =
     let hash =
@@ -1122,6 +1129,8 @@ let () =
       if Slack.configured () then Slack_page.step_of_hash hash else None
     in
     El.set_class (Jstr.v "on-slack") (Option.is_some step) doc_body;
+    (* ...where the configuration may have changed. *)
+    if Option.is_none step then !refresh_slack ();
     Option.iter
       (fun step ->
         slack_page.show step;
@@ -1203,8 +1212,9 @@ let () =
       ~body:(author ^ ": " ^ Smashtb.Slack_text.excerpt 240 text)
       ~tag:m.channel ~on_click:open_in_slack
   in
-  start_slack ~me:slack_me ~config:slack_config ~on_match:on_slack_match
-    set_slack_state slack_badge;
+  refresh_slack :=
+    start_slack ~me:slack_me ~config:slack_config ~on_match:on_slack_match
+      set_slack_state slack_badge;
 
   (* The list deliberately starts empty; the history column is what brings a
      previous batch back. *)

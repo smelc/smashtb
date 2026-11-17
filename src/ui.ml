@@ -3,7 +3,7 @@
 open Brr
 
 let cls c = At.class' (Jstr.v c)
-let txt = El.txt'
+let txt s = El.txt' s
 let attr n v = At.v (Jstr.v n) (Jstr.v v)
 
 let on_click el f =

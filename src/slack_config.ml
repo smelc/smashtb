@@ -19,6 +19,10 @@ type t = {
 }
 
 let empty = { channels = Smap.empty; pattern = ""; ignore_case = true }
+let pattern c = c.pattern
+let ignore_case c = c.ignore_case
+let with_pattern c pattern = { c with pattern }
+let with_ignore_case c ignore_case = { c with ignore_case }
 let key = "smashtb.slack"
 
 (* {1 Storage} *)
@@ -38,7 +42,7 @@ let to_jv c =
     |]
 
 let of_jv j =
-  let module J = Gh.J in
+  let module J = Jread in
   let chan j = { id = J.str j "id"; name = J.str j "name" } in
   let channels =
     List.fold_left
@@ -81,6 +85,8 @@ let set_watched c ~team ch on =
   }
 
 (* {1 Pattern} *)
+
+type regex = Jv.t
 
 let regexp = Jv.get Jv.global "RegExp"
 
