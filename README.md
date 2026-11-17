@@ -84,6 +84,15 @@ opens a two-step page:
    on the last 16 messages of each watched channel, and on the replies in the
    latest 8 threads among them, and highlights what matches.
 
+---
+
+<div align="center">
+  <img width="653" alt="slack-select-channel" src="https://github.com/user-attachments/assets/4a6da6f6-2c60-4f5f-9fc5-aa7fbac64c07" />
+  <img width="640" alt="slack-pattern-selection" src="https://github.com/user-attachments/assets/9c72dee8-3759-4c62-90e0-3581613f15e1" />
+</div>
+
+---
+
 Both are saved in the browser as you change them, so a restart keeps them, and
 opening the page again shows what is in force.
 
