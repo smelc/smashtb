@@ -13,7 +13,10 @@ let no_token_msg =
 module Urls = Map.Make (String)
 
 let history_key = "smashtb.history"
-let history_limit = 16
+
+(* How many entries the history keeps, most recent first. *)
+let history_limit = 8
+let keep_recent entries = List.filteri (fun i _ -> i < history_limit) entries
 
 (* {1 History}
 
@@ -85,9 +88,11 @@ let load_history () =
   | Some (Ok j) ->
       if Jv.is_none j then []
       else
-        List.filter
-          (fun e -> e.refs <> [] || e.slack <> None)
-          (Jv.to_list entry_of_jv j)
+        (* Trimmed too, for a history saved when the limit was higher. *)
+        keep_recent
+          (List.filter
+             (fun e -> e.refs <> [] || e.slack <> None)
+             (Jv.to_list entry_of_jv j))
 
 let save_history entries =
   Store.set history_key
@@ -999,8 +1004,7 @@ let () =
     let urls = List.map Gh.ref_url in
     let kept = List.filter (fun e -> urls e.refs <> urls refs) !history in
     history := { source; refs; slack = None } :: kept;
-    if List.length !history > history_limit then
-      history := List.filteri (fun i _ -> i < history_limit) !history;
+    history := keep_recent !history;
     save_history !history;
     render_history ()
   in
@@ -1198,8 +1202,7 @@ let () =
            (fun e ->
              match e.slack with Some o -> o.link <> link | None -> true)
            !history;
-    if List.length !history > history_limit then
-      history := List.filteri (fun i _ -> i < history_limit) !history;
+    history := keep_recent !history;
     save_history !history;
     render_history ();
     (* A click brings this tab forward (Notify does that) on the pull
