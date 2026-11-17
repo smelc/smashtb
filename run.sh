@@ -127,7 +127,16 @@ SLACK_APP_TOKEN = os.environ.get("SLACK_APP_APP_LEVEL_TOKEN", "")
 # The Web API methods the page may call with the user token. All of them only
 # read, so even a request that got past the checks in do_POST could not post
 # or change anything as you.
-SLACK_METHODS = {"auth.test", "conversations.list", "conversations.info", "users.info"}
+SLACK_METHODS = {
+    "auth.test",
+    "bots.info",
+    "conversations.history",
+    "conversations.info",
+    "conversations.list",
+    "conversations.replies",
+    "users.conversations",
+    "users.info",
+}
 
 RELOAD_JS = b"""<script>
 (function () {

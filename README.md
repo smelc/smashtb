@@ -73,10 +73,20 @@ The list of pull requests survives a reload. **Clear** empties it.
 
 ## Slack (optional)
 
-smashtb can listen to Slack over Socket Mode. For now it only connects: the
-`slack` badge in the top right says whether it is, and each message that
-arrives is logged to the browser console. Picking channels and matching
-patterns come next.
+smashtb can listen to Slack over Socket Mode. The `slack` badge in the top
+right says whether it is connected. Once it is, **Configure Slack** next to it
+opens a two-step page:
+
+1. **Channels**: every channel you are a member of, with a box to tick for
+   each one to watch.
+2. **Pattern**: a JavaScript regular expression. A new message in a watched
+   channel is picked up when it matches. To help get it right, the page runs it
+   on the last 16 messages of each watched channel, and on the replies in the
+   latest 8 threads among them, and highlights what matches.
+
+Both are saved in the browser as you change them, so a restart keeps them, and
+opening the page again shows what is in force. For now a message that is picked
+up is counted in the badge's tooltip and logged to the browser console.
 
 It needs a Slack app of your own. At https://api.slack.com/apps choose
 **Create New App**, then **From a manifest**, and paste:

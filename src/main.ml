@@ -5,53 +5,12 @@
 open Brr
 module Diff = Smashtb.Diff
 module Pr_order = Smashtb.Pr_order
-
-let cls c = At.class' (Jstr.v c)
-let txt = El.txt'
-let attr n v = At.v (Jstr.v n) (Jstr.v v)
-
-let on_click el f =
-  ignore (Ev.listen Ev.click (fun ev -> f ev) (El.as_target el))
-
-let set_disabled el b =
-  El.set_at (Jstr.v "disabled") (if b then Some Jstr.empty else None) el
-
-let set_open el b =
-  El.set_at (Jstr.v "open") (if b then Some Jstr.empty else None) el
-
-let details ?(at = []) children = El.v ~at (Jstr.v "details") children
-let summary ?(at = []) children = El.v ~at (Jstr.v "summary") children
-
-let button ?(classes = "btn") ?title label f =
-  let at = [ cls classes; attr "type" "button" ] in
-  let at =
-    match title with None -> at | Some t -> At.title (Jstr.v t) :: at
-  in
-  let b = El.button ~at [ txt label ] in
-  on_click b (fun ev ->
-      Ev.stop_propagation ev;
-      Ev.prevent_default ev;
-      f ());
-  b
-
-let plural n one many = if n = 1 then one else many
+open Ui
 
 let no_token_msg =
   "No GITHUB_TOKEN. Start the app with ./run.sh so a token is passed in."
 
 module Urls = Map.Make (String)
-
-(* {1 Persistence} *)
-
-let store = Brr_io.Storage.local G.window
-
-let store_get key =
-  match Brr_io.Storage.get_item store (Jstr.v key) with
-  | None -> ""
-  | Some v -> Jstr.to_string v
-
-let store_set key v =
-  ignore (Brr_io.Storage.set_item store (Jstr.v key) (Jstr.v v))
 
 let history_key = "smashtb.history"
 let history_limit = 16
@@ -89,14 +48,16 @@ let entry_of_jv j =
   }
 
 let load_history () =
-  match Json.decode (Jstr.v (store_get history_key)) with
-  | Error _ -> []
-  | Ok j ->
+  match
+    Option.map (fun s -> Json.decode (Jstr.v s)) (Store.get history_key)
+  with
+  | None | Some (Error _) -> []
+  | Some (Ok j) ->
       if Jv.is_none j then []
       else List.filter (fun e -> e.refs <> []) (Jv.to_list entry_of_jv j)
 
 let save_history entries =
-  store_set history_key
+  Store.set history_key
     (Jstr.to_string (Json.encode (Jv.of_list entry_to_jv entries)))
 
 (* How many references a hover lists before it stops. *)
@@ -601,29 +562,39 @@ let order_of_pr (pr : Gh.pr) =
 
 (* {1 Slack}
 
-   For now this only connects and counts what arrives, logging each message to
-   the console. Picking channels and matching patterns come next. *)
+   Connects, and counts the messages from watched channels that match the
+   pattern, logging each to the console. Both are set on the Slack page. *)
 
-let start_slack set_state badge =
+let start_slack ~me ~config set_state badge =
   if not (Slack.configured ()) then El.set_class (Jstr.v "hidden") true badge
   else begin
     (* What auth.test said about the user token: unknown until it answers.
        A refusal outranks a working socket, which only proves the app-level
        token. *)
     let who = ref None in
-    let received = ref 0 in
+    let matched = ref 0 in
     let connected () =
       match !who with
       | Some (Error e) -> Broken ("Slack turned the user token down: " ^ e)
       | _ ->
           let as_ =
-            match !who with Some (Ok u) when u <> "" -> " as " ^ u | _ -> ""
+            match !who with
+            | Some (Ok (me : Slack.me)) when me.user <> "" -> " as " ^ me.user
+            | _ -> ""
           in
-          Works
-            (Some
-               (Printf.sprintf "Connected to Slack%s. %d %s received so far."
-                  as_ !received
-                  (plural !received "message" "messages")))
+          let c = !config in
+          let n = List.length (Slack_config.watched_anywhere c) in
+          let watching =
+            if n = 0 then "No channel is watched yet."
+            else if String.trim c.Slack_config.pattern = "" then
+              "No pattern is set yet."
+            else
+              Printf.sprintf "%d %s matched so far in %d watched %s." !matched
+                (plural !matched "message" "messages")
+                n
+                (plural n "channel" "channels")
+          in
+          Works (Some (Printf.sprintf "Connected to Slack%s. %s" as_ watching))
     in
     let take_over = ref ignore in
     let here =
@@ -632,12 +603,24 @@ let start_slack set_state badge =
           "Move the Slack connection to this tab. The tab that has it now \
            waits instead." "Use Slack here" (fun () -> !take_over ())
     in
+    let configure =
+      button ~classes:"btn tiny"
+        ~title:"Choose the channels to watch and the pattern to look for"
+        "Configure Slack \xe2\x9a\x99\xef\xb8\x8f" (fun () ->
+          Slack_page.go (Slack_page.hash_of_step Channels))
+    in
     El.set_class (Jstr.v "hidden") true here;
-    El.insert_siblings `After badge [ here ];
+    El.set_class (Jstr.v "hidden") true configure;
+    El.insert_siblings `After badge [ here; configure ];
     let state = ref Slack.Connecting in
     let show s =
       state := s;
       El.set_class (Jstr.v "hidden") (s <> Slack.Other_tab) here;
+      El.set_class (Jstr.v "hidden")
+        (match (s, !who) with
+        | Slack.Connected, Some (Ok _) -> false
+        | _ -> true)
+        configure;
       set_state
         (match s with
         | Slack.Other_tab ->
@@ -650,22 +633,21 @@ let start_slack set_state badge =
             Broken
               (Printf.sprintf "Slack: %s. Trying again in %d s." why seconds))
     in
-    Fut.await (Slack.whoami ()) (fun r ->
+    Fut.await me (fun r ->
         who := Some r;
         show !state);
     let slack =
       Slack.start ~on_state:show ~on_message:(fun (m : Slack.message) ->
-          incr received;
-          show !state;
-          Console.(
-            log
-              [
-                str "slack message";
-                str m.channel;
-                str m.user;
-                str m.ts;
-                str m.text;
-              ]))
+          let c = !config in
+          if
+            Slack_config.is_watched c ~team:m.team m.channel
+            && Slack_config.matches c m.text
+          then begin
+            incr matched;
+            show !state;
+            Console.(
+              log [ str "slack match"; str m.channel; str m.user; str m.text ])
+          end)
     in
     take_over := slack.take_over
   end
@@ -1007,8 +989,37 @@ let () =
         status;
       ]
   in
-  El.set_children doc_body [ header; empty_hint; list_el ];
+  let slack_me =
+    if Slack.configured () then Slack.whoami ()
+    else Fut.return (Error "Slack is off")
+  in
+  let slack_config = ref (Slack_config.load ()) in
+  let slack_page = Slack_page.create ~me:slack_me ~config:slack_config in
+  El.set_children doc_body [ header; empty_hint; list_el; slack_page.el ];
   track_height header;
+
+  (* The Slack page replaces the rest while the address ends in #slack... *)
+  let route () =
+    let hash =
+      match Jstr.to_string (Uri.fragment (Window.location G.window)) with
+      | "" -> ""
+      | f -> "#" ^ f
+    in
+    let step =
+      if Slack.configured () then Slack_page.step_of_hash hash else None
+    in
+    El.set_class (Jstr.v "on-slack") (Option.is_some step) doc_body;
+    Option.iter
+      (fun step ->
+        slack_page.show step;
+        ignore
+          (Jv.call (Window.to_jv G.window) "scrollTo"
+             [| Jv.of_int 0; Jv.of_int 0 |]))
+      step
+  in
+  ignore
+    (Ev.listen Ev.hashchange (fun _ -> route ()) (Window.as_target G.window));
+  route ();
   render_history ();
 
   if token = "" then begin
@@ -1026,7 +1037,7 @@ let () =
           set_token_state (Broken ("GitHub turned this token down: " ^ e)))
   end;
 
-  start_slack set_slack_state slack_badge;
+  start_slack ~me:slack_me ~config:slack_config set_slack_state slack_badge;
 
   (* The list deliberately starts empty; the history column is what brings a
      previous batch back. *)
