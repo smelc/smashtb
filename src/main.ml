@@ -18,13 +18,23 @@ let history_limit = 16
 (* {1 History}
 
    The pull request list itself is deliberately not restored: a new session
-   starts empty. What is kept is the last few pastes that yielded something, so
-   a batch can be put back with one click. *)
+   starts empty. What is kept is the last few pastes that yielded something,
+   and the Slack messages that matched the pattern, so a batch can be put back
+   with one click. *)
+
+(* Where a Slack message came from, for an entry made from one. *)
+type slack_origin = {
+  channel : string;  (** the channel's name *)
+  author : string;
+  link : string;  (** the message's address in Slack *)
+}
 
 type entry = {
   source : string;
-      (** the text that was pasted, kept for recognising the entry *)
+      (** the text that was pasted, or the Slack message, kept for recognising
+          the entry *)
   refs : Gh.pr_ref list;  (** what was extracted from it *)
+  slack : slack_origin option;
 }
 
 let entry_to_jv e =
@@ -32,11 +42,22 @@ let entry_to_jv e =
     [|
       ("source", Jv.of_string e.source);
       ("refs", Jv.of_list Jv.of_string (List.map Gh.ref_url e.refs));
+      ( "slack",
+        match e.slack with
+        | None -> Jv.null
+        | Some o ->
+            Jv.obj
+              [|
+                ("channel", Jv.of_string o.channel);
+                ("author", Jv.of_string o.author);
+                ("link", Jv.of_string o.link);
+              |] );
     |]
 
 let entry_of_jv j =
   let str v = if Jv.is_none v then "" else Jstr.to_string (Jv.to_jstr v) in
   let refs = Jv.get j "refs" in
+  let slack = Jv.get j "slack" in
   {
     source = str (Jv.get j "source");
     refs =
@@ -45,6 +66,15 @@ let entry_of_jv j =
          List.filter_map
            (fun v -> Gh.parse_ref (str v))
            (Jv.to_list Fun.id refs));
+    slack =
+      (if Jv.is_none slack then None
+       else
+         Some
+           {
+             channel = str (Jv.get slack "channel");
+             author = str (Jv.get slack "author");
+             link = str (Jv.get slack "link");
+           });
   }
 
 let load_history () =
@@ -54,7 +84,10 @@ let load_history () =
   | None | Some (Error _) -> []
   | Some (Ok j) ->
       if Jv.is_none j then []
-      else List.filter (fun e -> e.refs <> []) (Jv.to_list entry_of_jv j)
+      else
+        List.filter
+          (fun e -> e.refs <> [] || e.slack <> None)
+          (Jv.to_list entry_of_jv j)
 
 let save_history entries =
   Store.set history_key
@@ -565,7 +598,22 @@ let order_of_pr (pr : Gh.pr) =
    Connects, and counts the messages from watched channels that match the
    pattern, logging each to the console. Both are set on the Slack page. *)
 
-let start_slack ~me ~config set_state badge =
+(* Slack's mark, roughly: Brr makes HTML elements, and an <svg> only renders in
+   the SVG namespace, hence the markup string. A constant, never anything that
+   came from Slack. *)
+let slack_svg =
+  "<svg viewBox=\"0 0 16 16\" width=\"13\" height=\"13\" \
+   aria-hidden=\"true\"><rect x=\"4.3\" y=\"1\" width=\"2.6\" height=\"14\" \
+   rx=\"1.3\" fill=\"#36C5F0\"/><rect x=\"9.1\" y=\"1\" width=\"2.6\" \
+   height=\"14\" rx=\"1.3\" fill=\"#2EB67D\"/><rect x=\"1\" y=\"4.3\" \
+   width=\"14\" height=\"2.6\" rx=\"1.3\" fill=\"#E01E5A\" \
+   fill-opacity=\".9\"/><rect x=\"1\" y=\"9.1\" width=\"14\" height=\"2.6\" \
+   rx=\"1.3\" fill=\"#ECB22E\" fill-opacity=\".9\"/></svg>"
+
+(* [on_match me m ~channel] is told about every message, not written by the
+   user, from a watched channel that matches the pattern, [channel] being its
+   name. *)
+let start_slack ~me ~config ~on_match set_state badge =
   if not (Slack.configured ()) then El.set_class (Jstr.v "hidden") true badge
   else begin
     (* What auth.test said about the user token: unknown until it answers.
@@ -594,7 +642,19 @@ let start_slack ~me ~config set_state badge =
                 n
                 (plural n "channel" "channels")
           in
-          Works (Some (Printf.sprintf "Connected to Slack%s. %s" as_ watching))
+          let notifications =
+            match Notify.permission () with
+            | Granted -> ""
+            | Ask -> " Notifications are off: press Enable notifications."
+            | Denied ->
+                " Notifications are blocked for this page: allow them in the \
+                 browser's settings for this site."
+            | Unsupported -> " This browser cannot show notifications."
+          in
+          Works
+            (Some
+               (Printf.sprintf "Connected to Slack%s. %s%s" as_ watching
+                  notifications))
     in
     let take_over = ref ignore in
     let here =
@@ -609,12 +669,23 @@ let start_slack ~me ~config set_state badge =
         "Configure Slack \xe2\x9a\x99\xef\xb8\x8f" (fun () ->
           Slack_page.go (Slack_page.hash_of_step Channels))
     in
+    let state = ref Slack.Connecting in
+    let show_ref = ref (fun _ -> ()) in
+    let enable =
+      button ~classes:"btn tiny"
+        ~title:"Let this page notify you of the Slack messages that match"
+        "Enable notifications \xf0\x9f\x94\x94" (fun () ->
+          Notify.request (fun _ -> !show_ref !state))
+    in
     El.set_class (Jstr.v "hidden") true here;
     El.set_class (Jstr.v "hidden") true configure;
-    El.insert_siblings `After badge [ here; configure ];
-    let state = ref Slack.Connecting in
+    El.set_class (Jstr.v "hidden") true enable;
+    El.insert_siblings `After badge [ here; enable; configure ];
     let show s =
       state := s;
+      El.set_class (Jstr.v "hidden")
+        (not (s = Slack.Connected && Notify.permission () = Ask))
+        enable;
       El.set_class (Jstr.v "hidden") (s <> Slack.Other_tab) here;
       El.set_class (Jstr.v "hidden")
         (match (s, !who) with
@@ -633,20 +704,34 @@ let start_slack ~me ~config set_state badge =
             Broken
               (Printf.sprintf "Slack: %s. Trying again in %d s." why seconds))
     in
+    show_ref := show;
     Fut.await me (fun r ->
         who := Some r;
         show !state);
     let slack =
       Slack.start ~on_state:show ~on_message:(fun (m : Slack.message) ->
           let c = !config in
+          let me = match !who with Some (Ok me) -> Some me | _ -> None in
+          let mine =
+            match me with Some me -> me.user_id = m.user | None -> false
+          in
           if
-            Slack_config.is_watched c ~team:m.team m.channel
+            (not mine)
+            && Slack_config.is_watched c ~team:m.team m.channel
             && Slack_config.matches c m.text
           then begin
             incr matched;
             show !state;
-            Console.(
-              log [ str "slack match"; str m.channel; str m.user; str m.text ])
+            let channel =
+              match
+                List.find_opt
+                  (fun (ch : Slack_config.channel) -> ch.id = m.channel)
+                  (Slack_config.watched c ~team:m.team)
+              with
+              | Some ch -> ch.name
+              | None -> m.channel
+            in
+            on_match me m ~channel
           end)
     in
     take_over := slack.take_over
@@ -824,30 +909,57 @@ let () =
           (fun r -> El.span ~at:[ cls "chip" ] [ txt (Gh.ref_to_string r) ])
           e.refs
       in
+      let icon =
+        match e.slack with
+        | None -> []
+        | Some _ ->
+            let i = El.span ~at:[ cls "entry-icon" ] [] in
+            set_svg i slack_svg;
+            [ i ]
+      in
+      let src =
+        match e.slack with
+        | None -> excerpt e.source
+        | Some o ->
+            Printf.sprintf "#%s \xc2\xb7 %s: %s" o.channel o.author
+              (excerpt e.source)
+      in
+      let hover =
+        match e.slack with
+        | None -> hover_text e.refs
+        | Some o ->
+            let what =
+              if e.refs = [] then
+                "No pull request in this message: click to open it in Slack."
+              else hover_text e.refs
+            in
+            Printf.sprintf "%s\n\nIn #%s, from %s:\n%s" what o.channel o.author
+              (Smashtb.Slack_text.excerpt 400 e.source)
+      in
       (* The whole row is the button: the column is too narrow to spare width
          for a separate target. Everything sits on one line, cut off at the
          edge rather than wrapping, so every entry is the same height and the
          list stays scannable; the hover names the pull requests instead. *)
       let el =
         El.button
-          ~at:
-            [
-              cls "entry";
-              attr "type" "button";
-              At.title (Jstr.v (hover_text e.refs));
-            ]
+          ~at:[ cls "entry"; attr "type" "button"; At.title (Jstr.v hover) ]
           [
             El.span
               ~at:[ cls "entry-line" ]
-              (chips
-              @ [ El.span ~at:[ cls "entry-src" ] [ txt (excerpt e.source) ] ]);
+              (icon @ chips @ [ El.span ~at:[ cls "entry-src" ] [ txt src ] ]);
           ]
       in
       on_click el (fun _ ->
-          List.iter (fun r -> add_ref r) e.refs;
-          say
-            (Printf.sprintf "Loaded %d %s from history." n
-               (plural n "pull request" "pull requests")));
+          match (e.refs, e.slack) with
+          | [], Some o when o.link <> "" ->
+              ignore
+                (Jv.call (Window.to_jv G.window) "open"
+                   [| Jv.of_string o.link; Jv.of_string "_blank" |])
+          | _ ->
+              List.iter (fun r -> add_ref r) e.refs;
+              say
+                (Printf.sprintf "Loaded %d %s from history." n
+                   (plural n "pull request" "pull requests")));
       el
     in
     let n = List.length !history in
@@ -859,7 +971,8 @@ let () =
       (if n = 0 then []
        else
          [
-           button ~classes:"btn tiny" ~title:"Forget every remembered paste"
+           button ~classes:"btn tiny"
+             ~title:"Forget every remembered paste and Slack message"
              "Clear history" (fun () ->
                history := [];
                save_history [];
@@ -880,7 +993,7 @@ let () =
   let remember source refs =
     let urls = List.map Gh.ref_url in
     let kept = List.filter (fun e -> urls e.refs <> urls refs) !history in
-    history := { source; refs } :: kept;
+    history := { source; refs; slack = None } :: kept;
     if List.length !history > history_limit then
       history := List.filteri (fun i _ -> i < history_limit) !history;
     save_history !history;
@@ -1037,7 +1150,61 @@ let () =
           set_token_state (Broken ("GitHub turned this token down: " ^ e)))
   end;
 
-  start_slack ~me:slack_me ~config:slack_config set_slack_state slack_badge;
+  (* A matching Slack message: say so, and keep it in the history so its pull
+     requests can be loaded later. Names come from Slack, at most once each. *)
+  let slack_names = ref Urls.empty in
+  let name_of id =
+    match Urls.find_opt id !slack_names with
+    | Some n -> Fut.return n
+    | None ->
+        Fut.map
+          (fun r ->
+            let n = Result.value r ~default:id in
+            slack_names := Urls.add id n !slack_names;
+            n)
+          (Slack.author_name id)
+  in
+  let on_slack_match (me : Slack.me option) (m : Slack.message) ~channel =
+    let ids = m.user :: Smashtb.Slack_text.user_mentions m.text in
+    Fut.await (Fut.of_list (List.map name_of ids)) @@ fun named ->
+    let names = List.combine ids named in
+    let author = List.assoc m.user names in
+    let text =
+      Smashtb.Slack_text.plain ~user:(fun id -> List.assoc_opt id names) m.text
+    in
+    let link =
+      match me with
+      | Some me when me.url <> "" ->
+          Smashtb.Slack_text.permalink ~workspace:me.url ~channel:m.channel
+            ~ts:m.ts ~thread_ts:m.thread_ts
+      | _ -> ""
+    in
+    let refs = Gh.extract_refs m.text in
+    let entry =
+      { source = text; refs; slack = Some { channel; author; link } }
+    in
+    history :=
+      entry
+      :: List.filter
+           (fun e ->
+             match e.slack with Some o -> o.link <> link | None -> true)
+           !history;
+    if List.length !history > history_limit then
+      history := List.filteri (fun i _ -> i < history_limit) !history;
+    save_history !history;
+    render_history ();
+    let open_in_slack () =
+      if link <> "" then
+        ignore
+          (Jv.call (Window.to_jv G.window) "open"
+             [| Jv.of_string link; Jv.of_string "_blank" |])
+    in
+    Notify.show ~title:("#" ^ channel)
+      ~body:(author ^ ": " ^ Smashtb.Slack_text.excerpt 240 text)
+      ~tag:m.channel ~on_click:open_in_slack
+  in
+  start_slack ~me:slack_me ~config:slack_config ~on_match:on_slack_match
+    set_slack_state slack_badge;
 
   (* The list deliberately starts empty; the history column is what brings a
      previous batch back. *)

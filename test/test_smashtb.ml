@@ -1,5 +1,5 @@
 (* Unit tests for the parts that do not need a browser: pull request URL
-   recognition and unified-diff parsing.  Run with `dune test`. *)
+   recognition, unified-diff parsing and Slack's message markup.  Run with `dune test`. *)
 
 open Smashtb
 
@@ -210,6 +210,49 @@ let () =
     (Pr_order.parent [ pr 2; pr 3 ] (pr 3) = None);
   check "no parent when the base is nobody's branch"
     (Pr_order.parent [ pr 2 ] (stacked 3 ~on:7) = None);
+
+  (* Slack message markup *)
+  let plain name ?user input expected =
+    let got = Slack_text.plain ?user input in
+    if got <> expected then begin
+      incr failures;
+      Printf.printf "FAIL %s: %S -> %S, expected %S\n" name input got expected
+    end
+  in
+  let names = function "U1" -> Some "alice" | _ -> None in
+  plain "plain text" "hello" "hello";
+  plain "labelled link" "see <https://x.dev/a|the doc>" "see the doc";
+  plain "bare link" "see <https://x.dev/a>" "see https://x.dev/a";
+  plain "mailto" "<mailto:a@b.c>" "a@b.c";
+  plain "known user" ~user:names "hi <@U1>" "hi @alice";
+  plain "unknown user" ~user:names "hi <@U2>" "hi @U2";
+  plain "user with label" "hi <@U2|bob>" "hi @bob";
+  plain "channel" "in <#C1|general>" "in #general";
+  plain "here" "<!here> ping" "@here ping";
+  plain "user group" "<!subteam^S1|@devs> look" "@devs look";
+  plain "user group without name" "<!subteam^S1>" "@subteam";
+  plain "entities" "a &lt;b&gt; &amp;amp;" "a <b> &amp;";
+  plain "unclosed bracket" "a <b" "a <b";
+  check "user mentions"
+    (Slack_text.user_mentions "<@U1> and <@U2|bob> and <@U3> and <@U1>"
+    = [ "U1"; "U3" ]);
+  check "no mentions" (Slack_text.user_mentions "" = []);
+  check "short excerpt untouched" (Slack_text.excerpt 10 "abc" = "abc");
+  check "excerpt cut" (Slack_text.excerpt 3 "abcdef" = "abc\xe2\x80\xa6");
+  check "excerpt on a character boundary"
+    (Slack_text.excerpt 2 "a\xc3\xa9b" = "a\xe2\x80\xa6");
+  check "permalink"
+    (Slack_text.permalink ~workspace:"https://w.slack.com/" ~channel:"C1"
+       ~ts:"1700000000.000100" ~thread_ts:None
+    = "https://w.slack.com/archives/C1/p1700000000000100");
+  check "permalink of a thread's first message"
+    (Slack_text.permalink ~workspace:"https://w.slack.com" ~channel:"C1"
+       ~ts:"1.2" ~thread_ts:(Some "1.2")
+    = "https://w.slack.com/archives/C1/p12");
+  check "permalink of a reply"
+    (Slack_text.permalink ~workspace:"https://w.slack.com/" ~channel:"C1"
+       ~ts:"1.3" ~thread_ts:(Some "1.2")
+    = "https://w.slack.com/archives/C1/p13?thread_ts=1.2&cid=C1");
 
   if !failures = 0 then print_endline "all tests passed"
   else begin

@@ -236,6 +236,7 @@ a:hover { text-decoration: underline; }
 }
 
 .entry-src { color: var(--fg-mut); font-size: 11.5px; }
+.entry-icon { display: inline-block; margin-right: 5px; vertical-align: -2px; }
 
 /* Narrow windows: the history drops below the input instead of squeezing it. */
 @media (max-width: 860px) {

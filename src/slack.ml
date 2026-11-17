@@ -65,8 +65,10 @@ let call meth params = post ("/slack/api/" ^ meth) params
 
 type me = {
   user : string;  (** the handle of the user the token belongs to *)
+  user_id : string;
   team : string;  (** the workspace's name *)
   team_id : string;
+  url : string;  (** the workspace's address, like https://name.slack.com/ *)
 }
 
 let whoami () =
@@ -74,8 +76,10 @@ let whoami () =
   return
     {
       user = J.str j "user";
+      user_id = J.str j "user_id";
       team = J.str j "team";
       team_id = J.str j "team_id";
+      url = J.str j "url";
     }
 
 type channel = {

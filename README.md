@@ -85,8 +85,21 @@ opens a two-step page:
    latest 8 threads among them, and highlights what matches.
 
 Both are saved in the browser as you change them, so a restart keeps them, and
-opening the page again shows what is in force. For now a message that is picked
-up is counted in the badge's tooltip and logged to the browser console.
+opening the page again shows what is in force.
+
+When a new message matches, from anyone but you:
+
+- **A browser notification** shows the channel, the author and the start of
+  the message. Clicking it opens the message in Slack. Press **Enable
+  notifications** next to the badge once to allow them. A new notification
+  from a channel replaces the previous one from that channel rather than
+  piling up.
+- **An entry in History**, marked with the Slack icon, keeps the message, so
+  nothing is lost if the notification goes unseen. Clicking it loads the pull
+  requests the message links to, or opens it in Slack if it links to none.
+
+Only the tab holding the Slack connection notifies, so keep one smashtb tab
+open; it can be in the background.
 
 It needs a Slack app of your own. At https://api.slack.com/apps choose
 **Create New App**, then **From a manifest**, and paste:
