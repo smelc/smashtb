@@ -99,7 +99,8 @@ opening the page again shows what is in force.
 When a new message matches, from anyone but you:
 
 - **A browser notification** shows the channel, the author and the start of
-  the message. Clicking it opens the message in Slack. Press **Enable
+  the message. Clicking it brings the smashtb tab that sent it to the front
+  and loads the pull requests the message links to. Press **Enable
   notifications** next to the badge once to allow them. A new notification
   from a channel replaces the previous one from that channel rather than
   piling up.

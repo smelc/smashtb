@@ -1202,15 +1202,30 @@ let () =
       history := List.filteri (fun i _ -> i < history_limit) !history;
     save_history !history;
     render_history ();
-    let open_in_slack () =
-      if link <> "" then
-        ignore
-          (Jv.call (Window.to_jv G.window) "open"
-             [| Jv.of_string link; Jv.of_string "_blank" |])
+    (* A click brings this tab forward (Notify does that) on the pull
+       requests, with the message's own ones loaded. The message itself stays
+       one click away, in the history. *)
+    let show_here () =
+      if El.class' (Jstr.v "on-slack") doc_body then
+        Jv.set (Jv.get Jv.global "location") "hash" (Jv.of_string "");
+      match refs with
+      | [] ->
+          say
+            (Printf.sprintf
+               "That message in #%s links no pull request; it is in the \
+                history, which opens it in Slack."
+               channel)
+      | refs ->
+          let n = List.length refs in
+          List.iter (fun r -> add_ref r) refs;
+          say
+            (Printf.sprintf "Loaded %d %s from #%s." n
+               (plural n "pull request" "pull requests")
+               channel)
     in
     Notify.show ~title:("#" ^ channel)
       ~body:(author ^ ": " ^ Smashtb.Slack_text.excerpt 240 text)
-      ~tag:m.channel ~on_click:open_in_slack
+      ~tag:m.channel ~on_click:show_here
   in
   refresh_slack :=
     start_slack ~me:slack_me ~config:slack_config ~on_match:on_slack_match
