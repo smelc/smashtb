@@ -74,9 +74,9 @@ a:hover { text-decoration: underline; }
 .brand h1 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
 .tag { color: var(--fg-mut); font-size: 12px; }
 
-/* Token badge, pushed to the top right corner of the header. */
+/* Token badges, pushed to the top right corner of the header. */
+.badges { margin-left: auto; display: flex; gap: 6px; }
 .token-badge {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;

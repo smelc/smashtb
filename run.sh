@@ -69,10 +69,25 @@ mkdir -p _site
 cp web/index.html web/style.css _site/
 cp _build/default/src/main.bc.js _site/smashtb.js
 
+# Slack is optional, and needs both tokens: the user token reads as you, the
+# app-level one opens the Socket Mode connection. Neither goes into config.js:
+# the server below makes every Slack call, so the page only learns whether
+# Slack is on.
+if [ -n "${SLACK_APP_OAUTH_TOKEN:-}" ] && [ -n "${SLACK_APP_APP_LEVEL_TOKEN:-}" ]; then
+  SLACK_ON=true
+else
+  SLACK_ON=false
+  if [ -n "${SLACK_APP_OAUTH_TOKEN:-}${SLACK_APP_APP_LEVEL_TOKEN:-}" ]; then
+    echo "Only one of SLACK_APP_OAUTH_TOKEN and SLACK_APP_APP_LEVEL_TOKEN is set;" >&2
+    echo "Slack needs both, so it stays off." >&2
+  fi
+fi
+
 # JSON-encode the token so quotes and backslashes cannot break out of the string.
-GITHUB_TOKEN="${GITHUB_TOKEN:-}" python3 - > _site/config.js <<'TOKEN_PY'
+GITHUB_TOKEN="${GITHUB_TOKEN:-}" SLACK_ON="$SLACK_ON" python3 - > _site/config.js <<'TOKEN_PY'
 import json, os
 print("window.SMASHTB_GITHUB_TOKEN = %s;" % json.dumps(os.environ.get("GITHUB_TOKEN", "")))
+print("window.SMASHTB_SLACK = %s;" % os.environ["SLACK_ON"])
 TOKEN_PY
 chmod 600 _site/config.js
 
@@ -82,12 +97,15 @@ chmod 600 _site/config.js
 exec python3 - "$BASE_PORT" "$PORT_TRIES" _site <<'SERVE_PY'
 import errno
 import http.server
+import json
 import os
 import signal
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 
 base, tries, directory = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 last = base + tries - 1
@@ -102,6 +120,14 @@ SOURCES = [
 
 version = 0
 url = ""
+port = 0
+
+SLACK_USER_TOKEN = os.environ.get("SLACK_APP_OAUTH_TOKEN", "")
+SLACK_APP_TOKEN = os.environ.get("SLACK_APP_APP_LEVEL_TOKEN", "")
+# The Web API methods the page may call with the user token. All of them only
+# read, so even a request that got past the checks in do_POST could not post
+# or change anything as you.
+SLACK_METHODS = {"auth.test", "conversations.list", "conversations.info", "users.info"}
 
 RELOAD_JS = b"""<script>
 (function () {
@@ -196,6 +222,70 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.index_with_reload()
         else:
             super().do_GET()
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        if not self.from_our_page():
+            self.send_error(403)
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length) if length > 0 else b""
+        if path == "/slack/connect":
+            self.slack("apps.connections.open", SLACK_APP_TOKEN, b"")
+        elif path.startswith("/slack/api/"):
+            method = path[len("/slack/api/"):]
+            if method in SLACK_METHODS:
+                self.slack(method, SLACK_USER_TOKEN, body)
+            else:
+                self.send_error(404)
+        else:
+            self.send_error(404)
+
+    def from_our_page(self):
+        """Whether a request comes from this app's own page.
+
+        Any web site open in the browser can send requests to localhost. The
+        Host check turns away DNS rebinding. The custom header turns away the
+        rest: a cross-origin page can only set it after a CORS preflight, and
+        this server answers none."""
+        hosts = {"localhost:%d" % port, "127.0.0.1:%d" % port}
+        if self.headers.get("Host") not in hosts:
+            return False
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in {"http://" + h for h in hosts}:
+            return False
+        return self.headers.get("X-Smashtb") == "1"
+
+    def slack(self, method, token, body):
+        """Forward a Web API call to Slack with [token], and Slack's answer
+        back to the page."""
+        if not token:
+            self.send_json(200, b'{"ok": false, "error": "token_not_set"}')
+            return
+        req = urllib.request.Request(
+            "https://slack.com/api/" + method,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                self.send_json(resp.status, resp.read())
+        except urllib.error.HTTPError as e:
+            self.send_json(e.code, e.read())
+        except (urllib.error.URLError, OSError) as e:
+            msg = "could not reach slack.com: %s" % getattr(e, "reason", e)
+            self.send_json(502, json.dumps({"ok": False, "error": msg}).encode())
+
+    def send_json(self, status, data):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def index_with_reload(self):
         try:

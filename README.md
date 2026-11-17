@@ -71,6 +71,57 @@ which is the point.
 
 The list of pull requests survives a reload. **Clear** empties it.
 
+## Slack (optional)
+
+smashtb can listen to Slack over Socket Mode. For now it only connects: the
+`slack` badge in the top right says whether it is, and each message that
+arrives is logged to the browser console. Picking channels and matching
+patterns come next.
+
+It needs a Slack app of your own. At https://api.slack.com/apps choose
+**Create New App**, then **From a manifest**, and paste:
+
+```yaml
+display_information:
+  name: smashtb
+  description: Notifies me of Slack messages matching a pattern
+oauth_config:
+  scopes:
+    user:
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+      - users:read
+settings:
+  event_subscriptions:
+    user_events:
+      - message.channels
+      - message.groups
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false
+```
+
+Then:
+
+1. **OAuth & Permissions**, **Install to Workspace**: copy the *User OAuth
+   Token* (`xoxp-...`) into `SLACK_APP_OAUTH_TOKEN`.
+2. **Basic Information**, **App-Level Tokens**, **Generate Token and Scopes**,
+   with the `connections:write` scope: copy the token (`xapp-...`) into
+   `SLACK_APP_APP_LEVEL_TOKEN`.
+
+Neither token reaches the page. slack.com does not let a browser send it an
+`Authorization` header, so the server started by `run.sh` makes the Slack Web
+API calls itself, for a short list of read-only methods, and only answers
+requests carrying the app's own header from its own origin. The page then opens
+the Socket Mode WebSocket directly.
+
+Slack hands each event to just one of an app's connections, so only one tab
+connects at a time. The others say *Slack is connected in another tab*, and
+one of them takes over when that tab closes. **Use Slack here**, next to the
+badge, moves the connection to the current tab straight away.
+
 ## Notes and limits
 
 - Diffs come from the pull request files endpoint, which sends a patch per

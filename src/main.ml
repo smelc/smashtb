@@ -154,8 +154,10 @@ type token_state =
       (** the login GitHub reported, when we asked for it *)
   | Broken of string  (** what went wrong *)
 
-let token_badge () =
-  let label = El.span ~at:[ cls "tok-label" ] [ txt "token" ] in
+(* [works_tip who] is the tooltip once the token is known to work, [who]
+   being the account it belongs to when we asked. *)
+let token_badge ~label ~works_tip () =
+  let label = El.span ~at:[ cls "tok-label" ] [ txt label ] in
   let glyph = El.span ~at:[ cls "tok-glyph" ] [] in
   let el = El.div ~at:[ cls "token-badge" ] [ label; glyph ] in
   let state = ref (Untested "") in
@@ -164,13 +166,7 @@ let token_badge () =
     let mark, style, tip =
       match s with
       | Untested why -> ("\xe2\x9d\x93", "tok-untested", why)
-      | Works None ->
-          ("\xe2\x9c\x85", "tok-works", "GitHub accepted this token.")
-      | Works (Some login) ->
-          ( "\xe2\x9c\x85",
-            "tok-works",
-            Printf.sprintf
-              "GitHub accepted this token. Approvals are posted as %s." login )
+      | Works who -> ("\xe2\x9c\x85", "tok-works", works_tip who)
       | Broken why -> ("\xe2\x9d\x8c", "tok-broken", why)
     in
     El.set_children glyph [ txt mark ];
@@ -603,12 +599,96 @@ let order_of_pr (pr : Gh.pr) =
     base_is_default = String.equal pr.base pr.default_branch;
   }
 
+(* {1 Slack}
+
+   For now this only connects and counts what arrives, logging each message to
+   the console. Picking channels and matching patterns come next. *)
+
+let start_slack set_state badge =
+  if not (Slack.configured ()) then El.set_class (Jstr.v "hidden") true badge
+  else begin
+    (* What auth.test said about the user token: unknown until it answers.
+       A refusal outranks a working socket, which only proves the app-level
+       token. *)
+    let who = ref None in
+    let received = ref 0 in
+    let connected () =
+      match !who with
+      | Some (Error e) -> Broken ("Slack turned the user token down: " ^ e)
+      | _ ->
+          let as_ =
+            match !who with Some (Ok u) when u <> "" -> " as " ^ u | _ -> ""
+          in
+          Works
+            (Some
+               (Printf.sprintf "Connected to Slack%s. %d %s received so far."
+                  as_ !received
+                  (plural !received "message" "messages")))
+    in
+    let take_over = ref ignore in
+    let here =
+      button ~classes:"btn tiny"
+        ~title:
+          "Move the Slack connection to this tab. The tab that has it now \
+           waits instead." "Use Slack here" (fun () -> !take_over ())
+    in
+    El.set_class (Jstr.v "hidden") true here;
+    El.insert_siblings `After badge [ here ];
+    let state = ref Slack.Connecting in
+    let show s =
+      state := s;
+      El.set_class (Jstr.v "hidden") (s <> Slack.Other_tab) here;
+      set_state
+        (match s with
+        | Slack.Other_tab ->
+            Untested
+              "Slack is connected in another tab. This one takes over when \
+               that tab closes."
+        | Connecting -> Untested "Connecting to Slack\xe2\x80\xa6"
+        | Connected -> connected ()
+        | Retrying { why; seconds } ->
+            Broken
+              (Printf.sprintf "Slack: %s. Trying again in %d s." why seconds))
+    in
+    Fut.await (Slack.whoami ()) (fun r ->
+        who := Some r;
+        show !state);
+    let slack =
+      Slack.start ~on_state:show ~on_message:(fun (m : Slack.message) ->
+          incr received;
+          show !state;
+          Console.(
+            log
+              [
+                str "slack message";
+                str m.channel;
+                str m.user;
+                str m.ts;
+                str m.text;
+              ]))
+    in
+    take_over := slack.take_over
+  end
+
 let () =
   let doc_body = Document.body G.document in
 
   (* --- state --- *)
   let token = token_from_page () in
-  let badge, set_token_state, token_status = token_badge () in
+  let badge, set_token_state, token_status =
+    token_badge ~label:"github"
+      ~works_tip:(function
+        | None -> "GitHub accepted this token."
+        | Some login ->
+            Printf.sprintf
+              "GitHub accepted this token. Approvals are posted as %s." login)
+      ()
+  in
+  let slack_badge, set_slack_state, _ =
+    token_badge ~label:"slack"
+      ~works_tip:(function None -> "Connected to Slack." | Some who -> who)
+      ()
+  in
   (* url -> the slot showing that pull request, so a card can be found again to
      replace or remove it. *)
   let loaded : slot Urls.t ref = ref Urls.empty in
@@ -913,7 +993,7 @@ let () =
           [
             El.h1 [ txt "smashtb" ];
             El.span ~at:[ cls "tag" ] [ txt "review, approve, move on" ];
-            badge;
+            El.div ~at:[ cls "badges" ] [ badge; slack_badge ];
           ];
         El.div
           ~at:[ cls "compose" ]
@@ -945,6 +1025,8 @@ let () =
       | Error e ->
           set_token_state (Broken ("GitHub turned this token down: " ^ e)))
   end;
+
+  start_slack set_slack_state slack_badge;
 
   (* The list deliberately starts empty; the history column is what brings a
      previous batch back. *)
