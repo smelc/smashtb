@@ -80,6 +80,14 @@ let entry_of_jv j =
            });
   }
 
+(* An entry's text must load its pull requests, since a click puts the text
+   in the box. Slack entries saved before the history kept link addresses
+   lack them: they get the addresses back, one per line, at the end. *)
+let with_its_links e =
+  let urls = List.map Gh.ref_url in
+  if urls (Gh.extract_refs e.source) = urls e.refs then e
+  else { e with source = String.concat "\n" (e.source :: urls e.refs) }
+
 let load_history () =
   match
     Option.map (fun s -> Json.decode (Jstr.v s)) (Store.get history_key)
@@ -90,8 +98,10 @@ let load_history () =
       else
         (* Trimmed too, for a history saved when the limit was higher. *)
         keep_recent
-          (List.filter
-             (fun e -> e.refs <> [] || e.slack <> None)
+          (List.filter_map
+             (fun e ->
+               if e.refs = [] && e.slack = None then None
+               else Some (with_its_links e))
              (Jv.to_list entry_of_jv j))
 
 let save_history entries =
@@ -997,19 +1007,23 @@ let () =
 
   (* Remembering a paste rather than the pull request list: the list starts
      empty every session, and this is what puts a batch back. *)
-  let remember ?entry source refs =
+  let remember source refs =
     let urls = List.map Gh.ref_url in
-    let kept = List.filter (fun e -> urls e.refs <> urls refs) !history in
-    (* An entry loaded again moves to the top as it was, keeping its own
-       text and its Slack origin. *)
-    let entry = Option.value entry ~default:{ source; refs; slack = None } in
-    history := entry :: kept;
+    let same, kept =
+      List.partition (fun e -> urls e.refs = urls refs) !history
+    in
+    (* The text of a Slack message, loaded again from the history, is still
+       that message: it keeps its icon and its link. *)
+    let slack =
+      List.find_map (fun e -> if e.source = source then e.slack else None) same
+    in
+    history := { source; refs; slack } :: kept;
     history := keep_recent !history;
     save_history !history;
     render_history ()
   in
 
-  let load ?entry () =
+  let load () =
     let raw = Jstr.to_string (El.prop El.Prop.value input) in
     if token = "" then say ~bad:true no_token_msg
     else
@@ -1024,7 +1038,7 @@ let () =
             (Printf.sprintf "Found %d %s\xe2\x80\xa6" n
                (plural n "pull request" "pull requests"));
           List.iter (fun r -> add_ref r) refs;
-          remember ?entry raw refs
+          remember raw refs
   in
 
   (* Ctrl+Enter (Cmd+Enter on a Mac) anywhere on the page presses Load, so a
@@ -1058,23 +1072,19 @@ let () =
     clear_list ();
     say "List cleared."
   in
-  (* An entry plays out as if typed: Clear, the entry's pull requests in the
-     box, one per line, then Load. *)
+  (* An entry plays out as if typed: Clear, its text in the box, then Load. *)
   (replay :=
      fun e ->
        clear ();
-       El.set_prop El.Prop.value
-         (Jstr.v (String.concat "\n" (List.map Gh.ref_url e.refs)))
-         input;
-       load ~entry:e ());
+       El.set_prop El.Prop.value (Jstr.v e.source) input;
+       load ());
 
   let controls =
     El.div
       ~at:[ cls "controls" ]
       [
         button ~classes:"btn primary"
-          ~title:"Load the pull requests found above (Ctrl+Enter)" "Load"
-          (fun () -> load ());
+          ~title:"Load the pull requests found above (Ctrl+Enter)" "Load" load;
         button ~classes:"btn danger"
           ~title:
             "Empty the pull request list, then load the pull requests found \
@@ -1197,6 +1207,13 @@ let () =
     let text =
       Smashtb.Slack_text.plain ~user:(fun id -> List.assoc_opt id names) m.text
     in
+    (* What the history keeps, and puts in the box: the message with its
+       links' addresses, so it loads the same pull requests as the message. *)
+    let source =
+      Smashtb.Slack_text.plain ~addresses:true
+        ~user:(fun id -> List.assoc_opt id names)
+        m.text
+    in
     let link =
       match me with
       | Some me when me.url <> "" ->
@@ -1205,9 +1222,7 @@ let () =
       | _ -> ""
     in
     let refs = Gh.extract_refs m.text in
-    let entry =
-      { source = text; refs; slack = Some { channel; author; link } }
-    in
+    let entry = { source; refs; slack = Some { channel; author; link } } in
     history :=
       entry
       :: List.filter

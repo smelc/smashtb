@@ -245,8 +245,8 @@ let () =
     [ "a" ];
 
   (* Slack message markup *)
-  let plain name ?user input expected =
-    let got = Slack_text.plain ?user input in
+  let plain name ?user ?addresses input expected =
+    let got = Slack_text.plain ?user ?addresses input in
     if got <> expected then begin
       incr failures;
       Printf.printf "FAIL %s: %S -> %S, expected %S\n" name input got expected
@@ -266,6 +266,15 @@ let () =
   plain "user group without name" "<!subteam^S1>" "@subteam";
   plain "entities" "a &lt;b&gt; &amp;amp;" "a <b> &amp;";
   plain "unclosed bracket" "a <b" "a <b";
+  plain "labelled link, with addresses" ~addresses:true
+    "see <https://x.dev/a|the doc>" "see the doc (https://x.dev/a)";
+  plain "link labelled by its address, with addresses" ~addresses:true
+    "see <https://x.dev/a|x.dev/a>" "see https://x.dev/a";
+  plain "bare link, with addresses" ~addresses:true "see <https://x.dev/a>"
+    "see https://x.dev/a";
+  plain "labelled mailto, with addresses" ~addresses:true
+    "<mailto:a@b.c|write> me" "write me";
+  plain "mention, with addresses" ~addresses:true "hi <@U2|bob>" "hi @bob";
   check "user mentions"
     (Slack_text.user_mentions "<@U1> and <@U2|bob> and <@U3> and <@U1>"
     = [ "U1"; "U3" ]);

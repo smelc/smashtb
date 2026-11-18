@@ -8,13 +8,17 @@
     {{:https://docs.slack.dev/messaging/formatting-message-text}Slack's
      formatting guide}. *)
 
-val plain : ?user:(string -> string option) -> string -> string
-(** [plain ~user text] is [text] with its markup replaced by what it reads as: a
-    link by its label, or its address when it has none ([mailto:] dropped); a
-    user mention by [@] and the name [user] gives for the id, else its label,
-    else the id; a channel by [#] and its name; [<!here>] and the like by
-    [@here]; a user group by its name. Entities are decoded. A [<] with no
-    closing [>] is kept as it is. [user] defaults to knowing no one. *)
+val plain :
+  ?user:(string -> string option) -> ?addresses:bool -> string -> string
+(** [plain ~user ~addresses text] is [text] with its markup replaced by what it
+    reads as: a link by its label, or its address when it has none ([mailto:]
+    dropped); with [addresses] (default [false]), a web link with a label also
+    gives its address, as [label (address)], or just the address when the label
+    only repeats it, so that the links survive in the text; a user mention by
+    [@] and the name [user] gives for the id, else its label, else the id; a
+    channel by [#] and its name; [<!here>] and the like by [@here]; a user group
+    by its name. Entities are decoded. A [<] with no closing [>] is kept as it
+    is. [user] defaults to knowing no one. *)
 
 val user_mentions : string -> string list
 (** [user_mentions text] is the ids of the users [text] mentions without giving

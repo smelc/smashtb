@@ -39,9 +39,15 @@ let unescape s =
   go 0;
   Buffer.contents b
 
+let drop_prefix ~prefix s =
+  let n = String.length prefix in
+  if String.length s >= n && String.sub s 0 n = prefix then
+    Some (String.sub s n (String.length s - n))
+  else None
+
 (* What one piece of markup, without its brackets, reads as. [user] names a
-   user id when it can. *)
-let render_markup ~user m =
+   user id when it can; [addresses] keeps a labelled link's address. *)
+let render_markup ~user ~addresses m =
   let target, label = split_label m in
   let rest s = String.sub s 1 (String.length s - 1) in
   if target = "" then Option.value label ~default:""
@@ -64,17 +70,25 @@ let render_markup ~user m =
             | None -> "@" ^ rest target
             | Some i -> "@" ^ String.sub target 1 (i - 1)))
     | _ -> (
-        match label with
-        | Some l -> l
-        | None ->
-            let mailto = "mailto:" in
-            let n = String.length mailto in
-            if String.length target > n && String.sub target 0 n = mailto then
-              String.sub target n (String.length target - n)
-            else target)
+        let mail = drop_prefix ~prefix:"mailto:" target in
+        match (label, mail) with
+        | None, Some address -> address
+        | None, None -> target
+        | Some l, Some _ -> l
+        | Some l, None when not addresses -> l
+        | Some l, None ->
+            (* Slack labels a pasted link with the address minus its scheme:
+               no need to say it twice. *)
+            let bare =
+              List.find_map
+                (fun prefix -> drop_prefix ~prefix target)
+                [ "https://"; "http://" ]
+            in
+            if l = target || Some l = bare then target
+            else Printf.sprintf "%s (%s)" l target)
 
 (* [text] as plain text. *)
-let plain ?(user = fun _ -> None) text =
+let plain ?(user = fun _ -> None) ?(addresses = false) text =
   let b = Buffer.create (String.length text) in
   let n = String.length text in
   let rec go i =
@@ -84,7 +98,8 @@ let plain ?(user = fun _ -> None) text =
       | None -> Buffer.add_string b (String.sub text i (n - i))
       | Some j ->
           Buffer.add_string b
-            (render_markup ~user (String.sub text (i + 1) (j - i - 1)));
+            (render_markup ~user ~addresses
+               (String.sub text (i + 1) (j - i - 1)));
           go (j + 1))
     else begin
       Buffer.add_char b text.[i];
