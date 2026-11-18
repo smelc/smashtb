@@ -71,6 +71,10 @@ which is the point.
 
 The list of pull requests survives a reload. **Clear** empties it.
 
+**History**, next to the box, keeps the last 8 batches loaded. Clicking one
+replays it as if typed: it clears the list, fills the box with that batch's
+pull requests, one per line, and loads them.
+
 ## Slack (optional)
 
 smashtb can listen to Slack over Socket Mode. The `slack` badge in the top

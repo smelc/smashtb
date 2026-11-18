@@ -911,9 +911,10 @@ let () =
     end
   in
 
+  (* What clicking an entry does; set once the buttons exist, below. *)
+  let replay = ref (fun (_ : entry) -> ()) in
   let rec render_history () =
     let entry_el e =
-      let n = List.length e.refs in
       let chips =
         List.map
           (fun r -> El.span ~at:[ cls "chip" ] [ txt (Gh.ref_to_string r) ])
@@ -965,11 +966,7 @@ let () =
               ignore
                 (Jv.call (Window.to_jv G.window) "open"
                    [| Jv.of_string o.link; Jv.of_string "_blank" |])
-          | _ ->
-              List.iter (fun r -> add_ref r) e.refs;
-              say
-                (Printf.sprintf "Loaded %d %s from history." n
-                   (plural n "pull request" "pull requests")));
+          | _ -> !replay e);
       el
     in
     let n = List.length !history in
@@ -1000,16 +997,19 @@ let () =
 
   (* Remembering a paste rather than the pull request list: the list starts
      empty every session, and this is what puts a batch back. *)
-  let remember source refs =
+  let remember ?entry source refs =
     let urls = List.map Gh.ref_url in
     let kept = List.filter (fun e -> urls e.refs <> urls refs) !history in
-    history := { source; refs; slack = None } :: kept;
+    (* An entry loaded again moves to the top as it was, keeping its own
+       text and its Slack origin. *)
+    let entry = Option.value entry ~default:{ source; refs; slack = None } in
+    history := entry :: kept;
     history := keep_recent !history;
     save_history !history;
     render_history ()
   in
 
-  let load () =
+  let load ?entry () =
     let raw = Jstr.to_string (El.prop El.Prop.value input) in
     if token = "" then say ~bad:true no_token_msg
     else
@@ -1024,7 +1024,7 @@ let () =
             (Printf.sprintf "Found %d %s\xe2\x80\xa6" n
                (plural n "pull request" "pull requests"));
           List.iter (fun r -> add_ref r) refs;
-          remember raw refs
+          remember ?entry raw refs
   in
 
   (* Ctrl+Enter (Cmd+Enter on a Mac) anywhere on the page presses Load, so a
@@ -1054,13 +1054,27 @@ let () =
     loaded := Urls.empty;
     refresh_list ()
   in
+  let clear () =
+    clear_list ();
+    say "List cleared."
+  in
+  (* An entry plays out as if typed: Clear, the entry's pull requests in the
+     box, one per line, then Load. *)
+  (replay :=
+     fun e ->
+       clear ();
+       El.set_prop El.Prop.value
+         (Jstr.v (String.concat "\n" (List.map Gh.ref_url e.refs)))
+         input;
+       load ~entry:e ());
 
   let controls =
     El.div
       ~at:[ cls "controls" ]
       [
         button ~classes:"btn primary"
-          ~title:"Load the pull requests found above (Ctrl+Enter)" "Load" load;
+          ~title:"Load the pull requests found above (Ctrl+Enter)" "Load"
+          (fun () -> load ());
         button ~classes:"btn danger"
           ~title:
             "Empty the pull request list, then load the pull requests found \
@@ -1082,9 +1096,7 @@ let () =
           ~title:
             "Remove every pull request from the list. Nothing is sent to \
              GitHub."
-          "Clear \xf0\x9f\x91\x87" (fun () ->
-            clear_list ();
-            say "List cleared.");
+          "Clear \xf0\x9f\x91\x87" clear;
       ]
   in
 
